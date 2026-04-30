@@ -101,9 +101,11 @@ function getTDEE(profile,weight){
 }
 const DAY_BURN={rest:0,gym:300,run_short:400,run_long:600};
 const FB={rest:{kcal:1700,protein:140,carbs:165,fat:55},gym:{kcal:2000,protein:140,carbs:200,fat:60},run_short:{kcal:1950,protein:140,carbs:195,fat:58},run_long:{kcal:2150,protein:140,carbs:220,fat:62}};
-function getDT(profile,dayType,weight,extraBurn=0){
+function getDT(profile,dayType,weight,extraBurn=0,hasLoggedActivity=false){
   const tdee=getTDEE(profile,weight);if(!tdee)return FB[dayType]||FB.rest;
-  const base=tdee+(DAY_BURN[dayType]||0)+extraBurn;
+  // If user logged an actual activity, use that burn instead of the day-type estimate
+  const estimatedBurn=hasLoggedActivity?0:(DAY_BURN[dayType]||0);
+  const base=tdee+estimatedBurn+extraBurn;
   const adj={cut:-400,bulk:300,maintain:0}[profile.goal||"cut"];
   const kcal=Math.max(1200,Math.round(base+adj));
   const pPerKg={cut:2.2,bulk:1.8,maintain:2.0}[profile.goal||"cut"];
@@ -112,7 +114,7 @@ function getDT(profile,dayType,weight,extraBurn=0){
   const carbs=Math.max(50,Math.round((kcal-protein*4-fat*9)/4));
   return{kcal,protein,carbs,fat};
 }
-function getMaint(profile,dayType,weight,extraBurn=0){const tdee=getTDEE(profile,weight);if(!tdee)return null;return Math.round(tdee+(DAY_BURN[dayType]||0)+extraBurn);}
+function getMaint(profile,dayType,weight,extraBurn=0,hasLoggedActivity=false){const tdee=getTDEE(profile,weight);if(!tdee)return null;const estimatedBurn=hasLoggedActivity?0:(DAY_BURN[dayType]||0);return Math.round(tdee+estimatedBurn+extraBurn);}
 function weeklyTrend(weights){if(weights.length<4)return null;const r=weights.slice(0,Math.min(weights.length,14));const days=(new Date(r[0].date)-new Date(r[r.length-1].date))/(24*3600*1000);if(days<3)return null;return((r[0].weight-r[r.length-1].weight)/days)*7;}
 function gCol(goal){return goal==="cut"?C.orange:goal==="bulk"?C.blue:C.lime;}
 
@@ -220,12 +222,17 @@ async function aFood(imgs, ps, mt, desc, apiKey) {
       + "Reply ONLY with JSON, nothing else:\n"
       + '{"type":"meal","name":"","kcal":0,"protein":0,"carbs":0,"fat":0,"notes":"canteen estimate","newProduct":null}';
   } else {
-    prompt = "You are a nutrition analyst. Analyze these " + compressed.length + " food photo(s) as ONE meal.\n"
-      + (desc ? "Dish name/description: " + desc + "\n" : "")
-      + "Known products: " + ctx + "\n"
-      + "Rules: if a scale is shown use that weight; multiple ingredients = sum all; meat = raw weight.\n\n"
-      + "Reply ONLY with JSON, nothing else:\n"
-      + '{"type":"meal","name":"","kcal":0,"protein":0,"carbs":0,"fat":0,"notes":"","newProduct":null}';
+    prompt = "You are a precision nutrition analyst. Analyze these " + compressed.length + " food photo(s).\n"
+      + (desc ? "Dish: " + desc + "\n" : "")
+      + "Known products per 100g: " + ctx + "\n\n"
+      + "CRITICAL RULES:\n"
+      + "- Each photo shows ONE ingredient being added to a blender/bowl on a scale.\n"
+      + "- READ THE SCALE DISPLAY in each photo — use that EXACT weight in grams.\n"
+      + "- DO NOT estimate weight if a scale is visible — use the number shown.\n"
+      + "- Count actual items shown (e.g. count egg shells to determine number of eggs).\n"
+      + "- List EVERY ingredient detected with its exact weight from the scale.\n\n"
+      + "Reply ONLY with this JSON:\n"
+      + '{"type":"meal","name":"","kcal":0,"protein":0,"carbs":0,"fat":0,"notes":"","newProduct":null,"ingredients":[{"name":"","weightG":0,"kcal":0,"protein":0,"carbs":0,"fat":0}]}';
   }
   return callAI([{ type:"text", text:prompt }, ...iBlks(compressed)], apiKey);
 }
@@ -364,7 +371,34 @@ function EditPrepSheet({prep,onSave,onClose}){
 function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
   const [mode,setMode]=useState("photos");const [mt,setMt]=useState("home");const [desc,setDesc]=useState("");const [imgs,setImgs]=useState([]);const [result,setResult]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState(null);const [form,setForm]=useState({name:"",kcal:"",protein:"",carbs:"",fat:"",notes:""});
   const activePreps=mealPreps.filter(p=>p.remaining>0);
-  const analyze=async()=>{setLoading(true);setErr(null);try{const res=await aFood(imgs,products,mt,desc,apiKey);setResult(res);if(res.type!=="activity")setForm({name:res.name||"",kcal:String(Math.round(res.kcal)||""),protein:String(Math.round(res.protein)||""),carbs:String(Math.round(res.carbs)||""),fat:String(Math.round(res.fat)||""),notes:res.notes||""});}catch(e){setErr(String(e.message||e));}setLoading(false);};
+  const [ingredients,setIngredients]=useState(null); // detected ingredients for confirmation
+  const analyze=async()=>{setLoading(true);setErr(null);try{
+    const res=await aFood(imgs,products,mt,desc,apiKey);
+    setResult(res);
+    if(res.type!=="activity"){
+      setForm({name:res.name||"",kcal:String(Math.round(res.kcal)||""),protein:String(Math.round(res.protein)||""),carbs:String(Math.round(res.carbs)||""),fat:String(Math.round(res.fat)||""),notes:res.notes||""});
+      // If AI returned ingredient breakdown, show confirmation step
+      if(res.ingredients&&res.ingredients.length>0){
+        setIngredients(res.ingredients.map(ing=>({...ing,weightG:String(ing.weightG||0)})));
+      }
+    }
+  }catch(e){setErr(String(e.message||e));}setLoading(false);};
+  // Recalculate totals from confirmed ingredient list
+  const recalcFromIngredients=()=>{
+    if(!ingredients)return;
+    const totals=ingredients.reduce((acc,ing)=>{
+      const scale=(parseFloat(ing.weightG)||0)/100;
+      // find product in known list for accurate per-100g values
+      const prod=products.find(p=>p.name.toLowerCase().includes(ing.name.toLowerCase().split(' ')[0]));
+      const kcal=prod?prod.kcal*scale:(ing.kcal||0);
+      const protein=prod?prod.p*scale:(ing.protein||0);
+      const carbs=prod?prod.c*scale:(ing.carbs||0);
+      const fat=prod?prod.f*scale:(ing.fat||0);
+      return{kcal:acc.kcal+kcal,protein:acc.protein+protein,carbs:acc.carbs+carbs,fat:acc.fat+fat};
+    },{kcal:0,protein:0,carbs:0,fat:0});
+    setForm(f=>({...f,kcal:String(Math.round(totals.kcal)),protein:String(Math.round(totals.protein)),carbs:String(Math.round(totals.carbs)),fat:String(Math.round(totals.fat))}));
+    setIngredients(null);
+  };
   const confirm=()=>{if(result?.type==="activity"){onAdd({type:"activity_from_meal",burnedKcal:result.burnedKcal});return;}const{newProduct,...meal}={id:Date.now(),name:form.name||"Meal",kcal:parseFloat(form.kcal)||0,protein:parseFloat(form.protein)||0,carbs:parseFloat(form.carbs)||0,fat:parseFloat(form.fat)||0,notes:form.notes,time:new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}),newProduct:result?.newProduct||null};onAdd({...meal,newProduct});};
   const usePrep=prep=>{const n=prep.portions-prep.remaining+1;onAdd({id:Date.now(),name:prep.name,kcal:prep.perKcal,protein:prep.perProtein,carbs:prep.perCarbs,fat:prep.perFat,notes:`Prep ${n}/${prep.portions}`,time:new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})});setMealPreps(ps=>ps.map(p=>p.id===prep.id?{...p,remaining:p.remaining-1}:p));};
   const canAnalyze=!loading&&imgs.length>0&&(mt==="canteen"?desc.trim().length>5:true);
@@ -385,7 +419,40 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
     </>)}
     {mode==="manual"&&!result&&(<><MacroFields form={form} setForm={setForm}/><div style={{display:"flex",gap:8,marginTop:14}}><button onClick={onClose} style={{flex:1,padding:"11px 0",borderRadius:10,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer"}}>Cancel</button><button onClick={confirm} style={{flex:2,padding:"11px 0",borderRadius:10,background:C.lime,color:"#000",fontWeight:700,border:"none",cursor:"pointer",fontSize:15}}>Add to Log</button></div></>)}
     {mode==="mealprep"&&(activePreps.length===0?<div style={{textAlign:"center",padding:"28px 0",color:C.muted}}><div style={{fontSize:30}}>{"🍱"}</div><div style={{fontSize:13,marginTop:8}}>No active preps. Create one in the Food tab.</div></div>:<div style={{display:"flex",flexDirection:"column",gap:8}}>{activePreps.map(prep=>(<div key={prep.id} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}><div><div style={{fontSize:14,fontWeight:600,color:C.text}}>{prep.name}</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{prep.remaining}/{prep.portions} left</div><div style={{display:"flex",gap:8,marginTop:5}}><Chip val={prep.perKcal} label="kcal" color={C.lime}/><Chip val={prep.perProtein} label="P" color={C.blue}/></div></div><button onClick={()=>usePrep(prep)} style={{padding:"9px 14px",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:13}}>+ Use</button></div>))}</div>)}
-    {result&&mode==="photos"&&(<>{result.type==="activity"?<div style={{background:"#140e03",border:"1px solid #2e1e07",borderRadius:12,padding:"14px 16px",marginBottom:12}}><div style={{fontSize:12,color:C.muted}}>Activity detected</div><div style={{fontSize:32,fontWeight:800,fontFamily:"monospace",color:C.orange}}>−{Math.round(result.burnedKcal)} kcal</div></div>:<MacroFields form={form} setForm={setForm}/> }<div style={{display:"flex",gap:8,marginTop:12}}><button onClick={()=>setResult(null)} style={{flex:1,padding:"11px 0",borderRadius:10,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer"}}>Back</button><button onClick={confirm} style={{flex:2,padding:"11px 0",borderRadius:10,background:C.lime,color:"#000",fontWeight:700,border:"none",cursor:"pointer",fontSize:15}}>{result.type==="activity"?"Log as Activity":"Add to Log"}</button></div></>)}
+    {result&&mode==="photos"&&(<>
+      {result.type==="activity"
+        ?<div style={{background:"#140e03",border:"1px solid #2e1e07",borderRadius:12,padding:"14px 16px",marginBottom:12}}><div style={{fontSize:12,color:C.muted}}>Activity detected</div><div style={{fontSize:32,fontWeight:800,fontFamily:"monospace",color:C.orange}}>−{Math.round(result.burnedKcal)} kcal</div></div>
+        :ingredients
+          ?(<div>
+              <div style={{fontSize:12,fontWeight:600,color:C.text,marginBottom:4}}>Confirm Ingredients</div>
+              <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Check each detected weight and correct if needed, then tap Confirm.</div>
+              <div style={{display:"flex",flexDirection:"column",gap:7,marginBottom:12}}>
+                {ingredients.map((ing,i)=>(
+                  <div key={i} style={{background:C.bg,borderRadius:10,padding:"10px 12px",border:`1px solid ${C.border}`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+                      <span style={{fontSize:13,color:C.text,flex:1}}>{ing.name}</span>
+                      <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                        <input type="number" value={ing.weightG} onChange={e=>{const v=e.target.value;setIngredients(p=>p.map((x,j)=>j===i?{...x,weightG:v}:x));}}
+                          style={{width:64,background:C.card,border:`1px solid ${C.lime}`,borderRadius:6,padding:"5px 8px",color:C.text,fontSize:14,fontFamily:"monospace",outline:"none",textAlign:"right"}}/>
+                        <span style={{fontSize:12,color:C.muted}}>g</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                <button onClick={()=>setIngredients(p=>[...p,{name:"",weightG:"0",kcal:0,protein:0,carbs:0,fat:0}])} style={{padding:"8px 0",borderRadius:8,background:"none",border:`1px dashed ${C.border}`,color:C.muted,cursor:"pointer",fontSize:12}}>+ Add missing ingredient</button>
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>setIngredients(null)} style={{flex:1,padding:"11px 0",borderRadius:10,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer",fontSize:13}}>Skip</button>
+                <button onClick={recalcFromIngredients} style={{flex:2,padding:"11px 0",borderRadius:10,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:15}}>Confirm Weights →</button>
+              </div>
+            </div>)
+          :<MacroFields form={form} setForm={setForm}/>
+      }
+      {!ingredients&&<div style={{display:"flex",gap:8,marginTop:12}}>
+        <button onClick={()=>setResult(null)} style={{flex:1,padding:"11px 0",borderRadius:10,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer"}}>Back</button>
+        <button onClick={confirm} style={{flex:2,padding:"11px 0",borderRadius:10,background:C.lime,color:"#000",fontWeight:700,border:"none",cursor:"pointer",fontSize:15}}>{result.type==="activity"?"Log as Activity":"Add to Log"}</button>
+      </div>}
+    </>)}
   </Sheet>);
 }
 
@@ -411,8 +478,9 @@ function CreatePrepSheet({products,onSave,onClose,apiKey}){
 function TodayTab({dayData,setDayData,mealPreps,setMealPreps,products,setProducts,profile,latestWeight,weights,setWeights,onGoToSettings}){
   const [modal,setModal]=useState(null);const [wInput,setWInput]=useState("");
   const extraBurn=(dayData.activities||[]).reduce((s,a)=>s+a.kcal,0)+(dayData.burnedExtra||0);
-  const dt=getDT(profile,dayData.dayType,latestWeight,extraBurn);
-  const maint=getMaint(profile,dayData.dayType,latestWeight,extraBurn);
+  const hasLoggedAct=(dayData.activities||[]).length>0||(dayData.burnedExtra||0)>0;
+  const dt=getDT(profile,dayData.dayType,latestWeight,extraBurn,hasLoggedAct);
+  const maint=getMaint(profile,dayData.dayType,latestWeight,extraBurn,hasLoggedAct);
   const tot=dayData.meals.reduce((a,m)=>({kcal:a.kcal+m.kcal,protein:a.protein+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat}),{kcal:0,protein:0,carbs:0,fat:0});
   const remKcal=dt.kcal-tot.kcal,remProt=dt.protein-tot.protein;
   const profileOK=profile.birthday&&profile.heightCm;const gc=gCol(profile.goal);
@@ -467,7 +535,7 @@ function TodayTab({dayData,setDayData,mealPreps,setMealPreps,products,setProduct
       {/* Day type */}
       <div style={{marginBottom:10}}>
         <div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:7}}>Day Type</div>
-        <div style={{display:"flex",gap:5}}>{Object.entries(DAY_TYPES).map(([key,val])=>{const active=dayData.dayType===key;const tKcal=getDT(profile,key,latestWeight,0).kcal;return(<button key={key} onClick={()=>setDayData(p=>({...p,dayType:key}))} style={{flex:1,padding:"7px 3px",borderRadius:10,border:`1px solid ${active?C.lime:C.border}`,background:active?`${C.lime}18`:C.card,color:active?C.lime:C.muted,fontWeight:active?700:400,cursor:"pointer",fontSize:9.5,lineHeight:1.4,textAlign:"center"}}><div style={{fontSize:14}}>{val.icon}</div><div>{val.label}</div><div style={{fontFamily:"monospace",fontSize:10,opacity:0.75,marginTop:1}}>{tKcal}</div></button>);})}</div>
+        <div style={{display:"flex",gap:5}}>{Object.entries(DAY_TYPES).map(([key,val])=>{const active=dayData.dayType===key;const tKcal=getDT(profile,key,latestWeight,0,false).kcal;return(<button key={key} onClick={()=>setDayData(p=>({...p,dayType:key}))} style={{flex:1,padding:"7px 3px",borderRadius:10,border:`1px solid ${active?C.lime:C.border}`,background:active?`${C.lime}18`:C.card,color:active?C.lime:C.muted,fontWeight:active?700:400,cursor:"pointer",fontSize:9.5,lineHeight:1.4,textAlign:"center"}}><div style={{fontSize:14}}>{val.icon}</div><div>{val.label}</div><div style={{fontFamily:"monospace",fontSize:10,opacity:0.75,marginTop:1}}>{tKcal}</div></button>);})}</div>
       </div>
 
       {/* Macro rings */}
@@ -554,13 +622,13 @@ function AnalysisTab({weights,profile,setProfile,progressPhotos,setProgressPhoto
   const latestWeight=weights[0]?.weight;const trend=weeklyTrend(weights);const gc=gCol(profile.goal);
   const spark=[...weights].reverse().slice(-20);const W=300,H=60;const vals=spark.map(w=>w.weight);const hasT=profile.targetWeightKg&&spark.length>1;const sMin=vals.length?Math.min(...vals,(hasT?profile.targetWeightKg:Infinity))-0.5:65;const sMax=vals.length?Math.max(...vals)+0.5:70;const px=i=>spark.length>1?(i/(spark.length-1))*W:W/2;const py=v=>H-((v-sMin)/(sMax-sMin))*(H-8)-4;
   const startW=weights[weights.length-1]?.weight||latestWeight;const totalLost=startW&&latestWeight?startW-latestWeight:null;const kgToGoal=profile.targetWeightKg&&latestWeight?latestWeight-profile.targetWeightKg:null;const weeksETA=trend&&kgToGoal&&Math.sign(kgToGoal)===Math.sign(trend)?Math.abs(kgToGoal/trend):null;const goalDate=weeksETA?new Date(Date.now()+weeksETA*7*24*3600*1000):null;const tdee=latestWeight?getTDEE(profile,latestWeight):null;
-  const analyze=async()=>{if(!imgs.length)return;setAnalyzing(true);setErr(null);try{const res=await aAnalysis(imgs,profile,latestWeight,trend,profile.apiKey);setResult(res);const entry={id:Date.now(),date:TODAY(),preview:imgs[0].preview,analysis:res};setProgressPhotos(p=>[entry,...p].slice(0,12));setImgs([]);}catch(e){setErr(String(e.message||e));}setAnalyzing(false);};
+  const analyze=async()=>{if(!imgs.length)return;setAnalyzing(true);setErr(null);try{const res=await aAnalysis(imgs,profile,latestWeight,trend,profile.apiKey);setResult(res);const entry={id:Date.now(),date:TODAY(),preview:imgs[0].preview,analysis:res};setProgressPhotos(p=>[entry,...p].slice(0,50));setImgs([]);}catch(e){setErr(String(e.message||e));}setAnalyzing(false);};
   return(<div style={{height:"100%",overflowY:"auto",padding:"0 16px 20px"}}>
     <div style={{padding:"18px 0 12px"}}><div style={{fontSize:26,fontWeight:800,color:C.text,letterSpacing:"-0.03em"}}>Analysis</div></div>
     {latestWeight&&<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"14px 16px",marginBottom:12}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
         <div><div style={{fontSize:11,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}>{profile.goal==="cut"?"Cutting":profile.goal==="bulk"?"Bulking":"Maintaining"}</div><div style={{display:"flex",alignItems:"baseline",gap:5,marginTop:4}}><span style={{fontSize:36,fontWeight:900,fontFamily:"monospace",color:C.text,letterSpacing:"-0.03em",lineHeight:1}}>{latestWeight.toFixed(2)}</span><span style={{fontSize:14,color:C.muted}}>kg</span>{trend!==null&&<span style={{fontSize:13,color:trend<0?C.lime:C.red,fontFamily:"monospace",marginLeft:4}}>{trend<0?"↓":"↑"}{Math.abs(trend).toFixed(2)}/wk</span>}</div></div>
-        <div style={{textAlign:"right"}}>{totalLost!==null&&<div><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase"}}>Total {totalLost>0?"lost":"gained"}</div><div style={{fontSize:18,fontWeight:800,fontFamily:"monospace",color:totalLost>0?C.lime:C.red}}>{totalLost>0?"-":""}{Math.abs(totalLost).toFixed(2)}kg</div></div>}{tdee&&<div style={{marginTop:4}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase"}}>TDEE</div><div style={{fontSize:14,fontWeight:700,fontFamily:"monospace",color:C.blue}}>{tdee} kcal</div></div>}</div>
+        <div style={{textAlign:"right"}}>{totalLost!==null&&<div><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase"}}>Total {profile.goal==="bulk"?(totalLost<0?"gained":"lost"):(totalLost>0?"lost":"gained")}</div><div style={{fontSize:18,fontWeight:800,fontFamily:"monospace",color:(profile.goal==="bulk"?totalLost<0:totalLost>0)?C.lime:C.red}}>{(profile.goal==="bulk"?totalLost<0:totalLost>0)?"-":""}{Math.abs(totalLost).toFixed(2)}kg</div></div>}{tdee&&<div style={{marginTop:4}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase"}}>TDEE</div><div style={{fontSize:14,fontWeight:700,fontFamily:"monospace",color:C.blue}}>{tdee} kcal</div></div>}</div>
       </div>
       {spark.length>=3&&<svg width="100%" viewBox={"0 0 "+W+" "+H} style={{display:"block",marginBottom:8}}>
         {hasT&&<line x1={0} y1={py(profile.targetWeightKg)} x2={W} y2={py(profile.targetWeightKg)} stroke={gc+"50"} strokeWidth={1} strokeDasharray="4 4"/>}
