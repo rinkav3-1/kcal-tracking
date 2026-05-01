@@ -156,7 +156,7 @@ async function resizeImg(dataUrl, maxPx=1024) {
 }
 async function prepImgs(imgs) {
   const out = [];
-  for (const img of imgs.slice(0, 6)) {
+  for (const img of imgs.slice(0, 8)) {
     const resized = await resizeImg(img.preview);
     out.push({ data: resized.split(",")[1], mt: "image/jpeg", preview: resized });
   }
@@ -222,17 +222,18 @@ async function aFood(imgs, ps, mt, desc, apiKey) {
       + "Reply ONLY with JSON, nothing else:\n"
       + '{"type":"meal","name":"","kcal":0,"protein":0,"carbs":0,"fat":0,"notes":"canteen estimate","newProduct":null}';
   } else {
-    prompt = "You are a precision nutrition analyst. Analyze these " + compressed.length + " food photo(s).\n"
+    prompt = "You are a precision nutrition analyst reading food photos with kitchen scales.\n"
       + (desc ? "Dish: " + desc + "\n" : "")
       + "Known products per 100g: " + ctx + "\n\n"
-      + "CRITICAL RULES:\n"
-      + "- Each photo shows ONE ingredient being added to a blender/bowl on a scale.\n"
-      + "- READ THE SCALE DISPLAY in each photo — use that EXACT weight in grams.\n"
-      + "- DO NOT estimate weight if a scale is visible — use the number shown.\n"
-      + "- Count actual items shown (e.g. count egg shells to determine number of eggs).\n"
-      + "- List EVERY ingredient detected with its exact weight from the scale.\n\n"
-      + "Reply ONLY with this JSON:\n"
-      + '{"type":"meal","name":"","kcal":0,"protein":0,"carbs":0,"fat":0,"notes":"","newProduct":null,"ingredients":[{"name":"","weightG":0,"kcal":0,"protein":0,"carbs":0,"fat":0}]}';
+      + "INSTRUCTIONS — follow these exactly:\n"
+      + "1. Each photo shows ONE ingredient on a CAMRY digital scale that has been ZEROED/TARED first.\n"
+      + "2. The scale reading in each photo = the EXACT weight of ONLY that ingredient. Do not subtract anything.\n"
+      + "3. Read the digital display number carefully — it shows grams.\n"
+      + "4. If you see an egg shell being held, the eggs have already been cracked in — the scale number IS the egg weight.\n"
+      + "5. Identify EVERY ingredient across ALL " + compressed.length + " photos — do not skip any photo.\n"
+      + "6. NEVER estimate weight — use only the number shown on the scale display.\n\n"
+      + "Reply ONLY with this JSON and nothing else:\n"
+      + '{"type":"meal","name":"","kcal":0,"protein":0,"carbs":0,"fat":0,"notes":"","newProduct":null,"ingredients":[{"name":"Ingredient name","weightG":0}]}';
   }
   return callAI([{ type:"text", text:prompt }, ...iBlks(compressed)], apiKey);
 }
@@ -368,6 +369,48 @@ function EditPrepSheet({prep,onSave,onClose}){
   return(<Sheet onClose={onClose} title="Edit Prep"><div style={{display:"flex",flexDirection:"column",gap:9}}><Field label="Name" value={name} onChange={setName}/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}><Field label="Total Kcal" value={tK} onChange={setTK} type="number"/><Field label="Total Protein g" value={tP} onChange={setTP} type="number"/><Field label="Total Carbs g" value={tC} onChange={setTC} type="number"/><Field label="Total Fat g" value={tF} onChange={setTF} type="number"/><Field label="Total weight g" value={wt} onChange={setWt} type="number"/><Field label="Total portions" value={portions} onChange={setPortions} type="number"/></div><Field label="Portions remaining" value={remaining} onChange={setRemaining} type="number"/>{parseFloat(tK)>0&&n>0&&(<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px"}}><div style={{fontSize:11,color:C.muted,marginBottom:4}}>Per portion ({n})</div><div style={{display:"flex",gap:10}}><Chip val={(parseFloat(tK)||0)/n} label="kcal" color={C.lime}/><Chip val={(parseFloat(tP)||0)/n} label="P" color={C.blue}/><Chip val={(parseFloat(tC)||0)/n} label="C" color={C.orange}/><Chip val={(parseFloat(tF)||0)/n} label="F" color={C.purple}/></div></div>)}<div style={{display:"flex",gap:8,marginTop:4}}><button onClick={onClose} style={{flex:1,padding:"11px 0",borderRadius:10,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer"}}>Cancel</button><button onClick={save} style={{flex:2,padding:"11px 0",borderRadius:10,background:C.lime,color:"#000",fontWeight:700,border:"none",cursor:"pointer",fontSize:15}}>Save</button></div></div></Sheet>);
 }
 
+
+// ── AddIngredientRow — inline add with name + weight ──────────────────────────
+function AddIngredientRow({onAdd,products}) {
+  const [name,setName]=useState("");const [wg,setWg]=useState("");const [open,setOpen]=useState(false);
+  const [suggestions,setSuggestions]=useState([]);
+  const onNameChange=v=>{
+    setName(v);
+    if(v.length>1&&products){
+      const q=v.toLowerCase();
+      setSuggestions(products.filter(p=>p.name.toLowerCase().includes(q)).slice(0,4));
+    } else { setSuggestions([]); }
+  };
+  const pick=prod=>{setName(prod.name);setSuggestions([]);};
+  const submit=()=>{
+    if(!name.trim()||!wg)return;
+    // Find matching product for accurate macros
+    const q=name.toLowerCase();
+    const prod=products?.find(p=>p.name.toLowerCase().includes(q)||q.includes(p.name.toLowerCase().split(' ')[0]));
+    onAdd({name:name.trim(),weightG:wg,kcal:prod?prod.kcal:0,protein:prod?prod.p:0,carbs:prod?prod.c:0,fat:prod?prod.f:0,_fromProduct:!!prod});
+    setName("");setWg("");setOpen(false);setSuggestions([]);
+  };
+  if(!open) return(<button onClick={()=>setOpen(true)} style={{padding:"8px 0",borderRadius:8,background:"none",border:`1px dashed ${C.border}`,color:C.muted,cursor:"pointer",fontSize:12,width:"100%"}}>+ Add missing ingredient</button>);
+  return(<div style={{background:C.faint,borderRadius:8,padding:"10px 12px"}}>
+    <div style={{display:"flex",gap:8,alignItems:"center"}}>
+      <div style={{flex:2,position:"relative"}}>
+        <input value={name} onChange={e=>onNameChange(e.target.value)} placeholder="Ingredient name" style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 9px",color:C.text,fontSize:13,outline:"none"}}/>
+        {suggestions.length>0&&<div style={{position:"absolute",top:"100%",left:0,right:0,background:C.surf,border:`1px solid ${C.border}`,borderRadius:6,zIndex:10,marginTop:2}}>
+          {suggestions.map((p,i)=><button key={i} onClick={()=>pick(p)} style={{display:"block",width:"100%",padding:"7px 10px",background:"none",border:"none",color:C.text,fontSize:12,cursor:"pointer",textAlign:"left",borderBottom:i<suggestions.length-1?`1px solid ${C.border}`:"none"}}>{p.name}</button>)}
+        </div>}
+      </div>
+      <input type="number" value={wg} onChange={e=>setWg(e.target.value)} placeholder="g" style={{width:60,background:C.bg,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 9px",color:C.text,fontSize:13,fontFamily:"monospace",outline:"none"}}/>
+      <span style={{fontSize:12,color:C.muted,flexShrink:0}}>g</span>
+    </div>
+    {name&&products?.find(p=>p.name.toLowerCase().includes(name.toLowerCase()))&&<div style={{fontSize:11,color:C.lime,marginTop:4}}>✓ Matched product — exact macros will be used</div>}
+    {name&&!products?.find(p=>p.name.toLowerCase().includes(name.toLowerCase()))&&name.length>2&&<div style={{fontSize:11,color:C.muted,marginTop:4}}>No match in products — AI estimate will be used</div>}
+    <div style={{display:"flex",gap:8,marginTop:8}}>
+      <button onClick={()=>{setOpen(false);setSuggestions([]);}} style={{flex:1,padding:"7px 0",borderRadius:6,background:"none",border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:12}}>Cancel</button>
+      <button onClick={submit} disabled={!name.trim()||!wg} style={{flex:2,padding:"7px 0",borderRadius:6,background:name.trim()&&wg?C.lime:C.faint,border:"none",color:"#000",fontWeight:700,cursor:name.trim()&&wg?"pointer":"default",fontSize:12}}>Add Ingredient</button>
+    </div>
+  </div>);
+}
+
 function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
   const [mode,setMode]=useState("photos");const [mt,setMt]=useState("home");const [desc,setDesc]=useState("");const [imgs,setImgs]=useState([]);const [result,setResult]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState(null);const [form,setForm]=useState({name:"",kcal:"",protein:"",carbs:"",fat:"",notes:""});
   const activePreps=mealPreps.filter(p=>p.remaining>0);
@@ -387,13 +430,20 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
   const recalcFromIngredients=()=>{
     if(!ingredients)return;
     const totals=ingredients.reduce((acc,ing)=>{
-      const scale=(parseFloat(ing.weightG)||0)/100;
-      // find product in known list for accurate per-100g values
-      const prod=products.find(p=>p.name.toLowerCase().includes(ing.name.toLowerCase().split(' ')[0]));
-      const kcal=prod?prod.kcal*scale:(ing.kcal||0);
-      const protein=prod?prod.p*scale:(ing.protein||0);
-      const carbs=prod?prod.c*scale:(ing.carbs||0);
-      const fat=prod?prod.f*scale:(ing.fat||0);
+      const grams=parseFloat(ing.weightG)||0;
+      const scale=grams/100;
+      // Look up product by fuzzy name match
+      const nameLower=ing.name.toLowerCase();
+      const prod=products.find(p=>{
+        const pl=p.name.toLowerCase();
+        const words=nameLower.split(/\s+/).filter(w=>w.length>2);
+        return words.some(w=>pl.includes(w));
+      });
+      // Use product macros if found (accurate), else fall back to AI estimates scaled by weight
+      const kcal   = prod ? prod.kcal*scale : (ing.kcal||0)*scale;
+      const protein= prod ? prod.p*scale    : (ing.protein||0)*scale;
+      const carbs  = prod ? prod.c*scale    : (ing.carbs||0)*scale;
+      const fat    = prod ? prod.f*scale    : (ing.fat||0)*scale;
       return{kcal:acc.kcal+kcal,protein:acc.protein+protein,carbs:acc.carbs+carbs,fat:acc.fat+fat};
     },{kcal:0,protein:0,carbs:0,fat:0});
     setForm(f=>({...f,kcal:String(Math.round(totals.kcal)),protein:String(Math.round(totals.protein)),carbs:String(Math.round(totals.carbs)),fat:String(Math.round(totals.fat))}));
@@ -439,7 +489,7 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
                     </div>
                   </div>
                 ))}
-                <button onClick={()=>setIngredients(p=>[...p,{name:"",weightG:"0",kcal:0,protein:0,carbs:0,fat:0}])} style={{padding:"8px 0",borderRadius:8,background:"none",border:`1px dashed ${C.border}`,color:C.muted,cursor:"pointer",fontSize:12}}>+ Add missing ingredient</button>
+                <AddIngredientRow onAdd={ing=>setIngredients(p=>[...p,ing])} products={products}/>
               </div>
               <div style={{display:"flex",gap:8}}>
                 <button onClick={()=>setIngredients(null)} style={{flex:1,padding:"11px 0",borderRadius:10,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer",fontSize:13}}>Skip</button>
@@ -669,9 +719,11 @@ function AnalysisTab({weights,profile,setProfile,progressPhotos,setProgressPhoto
 function HistoryTab({weights}){
   const [dates,setDates]=useState([]);const [logs,setLogs]=useState({});const [expanded,setExpanded]=useState(null);const [loading,setLoading]=useState(true);
   const [editMeal,setEditMeal]=useState(null);const [editAct,setEditAct]=useState(null);const [addMealDate,setAddMealDate]=useState(null);const [addActDate,setAddActDate]=useState(null);
+  const [newDayPicker,setNewDayPicker]=useState(false);const [newDayDate,setNewDayDate]=useState("");
   // Build weight lookup by date
   const weightByDate=Object.fromEntries(weights.map(w=>[w.date,w.weight]));
   useEffect(()=>{store.get("fit_dates",[]).then(async ds=>{setDates(ds);const e={};for(const d of ds.slice(0,30)){e[d]=await store.get(`fit_day_${d}`,null);}setLogs(e);setLoading(false);});},[]);
+  const createDay=async(date)=>{if(!date||logs[date])return;const newLog={date,dayType:"rest",meals:[],activities:[],burnedExtra:0,tags:[]};await store.set(`fit_day_${date}`,newLog);await addToIndex(date);setLogs(p=>({...p,[date]:newLog}));setDates(p=>[date,...p.filter(d=>d!==date)].sort((a,b)=>b.localeCompare(a)));setExpanded(date);setNewDayPicker(false);setNewDayDate("");};
   const updateLog=async(date,data)=>{await store.set(`fit_day_${date}`,data);setLogs(p=>({...p,[date]:data}));};
   const updateMeal=(date,meal)=>{const log=logs[date];updateLog(date,{...log,meals:log.meals.map(m=>m.id===meal.id?meal:m)});setEditMeal(null);};
   const deleteMeal=(date,id)=>{const log=logs[date];updateLog(date,{...log,meals:log.meals.filter(m=>m.id!==id)});};
@@ -681,7 +733,12 @@ function HistoryTab({weights}){
   const addAct=(date,act)=>{const log=logs[date];updateLog(date,{...log,activities:[...(log.activities||[]),act]});setAddActDate(null);};
   const toggleTag=(date,tagId)=>{const log=logs[date];const tags=log.tags||[];updateLog(date,{...log,tags:tags.includes(tagId)?tags.filter(t=>t!==tagId):[...tags,tagId]});};
   return(<div style={{height:"100%",overflowY:"auto",padding:"0 16px 20px"}}>
-    <div style={{padding:"18px 0 12px"}}><div style={{fontSize:26,fontWeight:800,color:C.text,letterSpacing:"-0.03em"}}>History</div><div style={{fontSize:12,color:C.muted}}>{dates.length} days logged</div></div>
+    <div style={{padding:"18px 0 12px",display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}><div><div style={{fontSize:26,fontWeight:800,color:C.text,letterSpacing:"-0.03em"}}>History</div><div style={{fontSize:12,color:C.muted}}>{dates.length} days logged</div></div><button onClick={()=>setNewDayPicker(p=>!p)} style={{padding:"8px 14px",borderRadius:8,background:newDayPicker?`${C.lime}20`:C.card,border:`1px solid ${newDayPicker?C.lime:C.border}`,color:newDayPicker?C.lime:C.muted,fontWeight:600,cursor:"pointer",fontSize:12}}>+ Past day</button></div>
+    {newDayPicker&&<div style={{background:C.card,border:`1px solid ${C.lime}`,borderRadius:12,padding:"12px 14px",marginBottom:12,display:"flex",gap:8,alignItems:"center"}}>
+      <input type="date" value={newDayDate} onChange={e=>setNewDayDate(e.target.value)} max={TODAY()} style={{flex:1,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 11px",color:C.text,fontSize:14,outline:"none"}}/>
+      <button onClick={()=>createDay(newDayDate)} disabled={!newDayDate} style={{padding:"9px 14px",borderRadius:8,background:newDayDate?C.lime:C.faint,border:"none",color:"#000",fontWeight:700,cursor:newDayDate?"pointer":"default",fontSize:13}}>Add</button>
+      <button onClick={()=>setNewDayPicker(false)} style={{padding:"9px 10px",borderRadius:8,background:"none",border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:13}}>✕</button>
+    </div>}
     {loading&&<div style={{textAlign:"center",padding:"40px 0",color:C.muted}}>Loading…</div>}
     {!loading&&!dates.length&&<div style={{textAlign:"center",padding:"40px 0",color:C.muted}}>No history yet.</div>}
     <div style={{display:"flex",flexDirection:"column",gap:7}}>
