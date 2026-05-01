@@ -40,6 +40,13 @@ const DAY_TAGS = [
   { id:"sick",     emoji:"🤒", label:"Sick"      },
   { id:"cheat",    emoji:"🎉", label:"Cheat day" },
 ];
+const MEAL_TYPES = [
+  { id:"breakfast", label:"Breakfast", emoji:"🌅" },
+  { id:"lunch",     label:"Lunch",     emoji:"☀️"  },
+  { id:"dinner",    label:"Dinner",    emoji:"🌙" },
+  { id:"snack",     label:"Snack",     emoji:"🍎" },
+  { id:"drink",     label:"Drink",     emoji:"🥤" },
+];
 const GOALS = [
   { id:"cut",      label:"Cut",      emoji:"✂️", desc:"Lose fat (~400 kcal deficit)",    col:"#ff6b35" },
   { id:"maintain", label:"Maintain", emoji:"⚖️", desc:"Recomp, near TDEE",               col:"#c4f135" },
@@ -76,6 +83,8 @@ const PRESETS = [
   { name:"Zuveja African Catfish (raw)",     kcal:185, p:15.36, c:0,    f:12   },
   { name:"Mexican Veggie Mix",               kcal:60,  p:3.2,   c:10,   f:0.5  },
   { name:"Julian Bakery ProGranola Espresso",kcal:333, p:33.3,  c:43.3, f:13.3 },
+  { name:"Julian Bakery ProGranola Peanut Butter",kcal:400,p:36.67,c:40,   f:18.33},
+  { name:"Pilos HP Natural Yogurt",              kcal:67,  p:11,   c:3.6,  f:0.4  },
   { name:"Pilos Liesa Varškė 0.5%",         kcal:98,  p:19.8,  c:3.1,  f:0.3  },
   { name:"Lidl Spicy Mustard",               kcal:149, p:7.2,   c:1.8,  f:11   },
   { name:"Kania Dijon Mustard",              kcal:110, p:3.7,   c:6,    f:7    },
@@ -183,9 +192,10 @@ function extractJSON(text) {
 }
 
 const inClaudeAI = () => { try { return typeof window.storage !== "undefined"; } catch { return false; } };
-// Model — must be exactly this string for Claude.ai artifact proxy
-const AI_MODEL = "claude-haiku-4-5-20251001";
-async function callAI(content, apiKey) {
+// Vision model for scale/label reading, Haiku for simple text
+const VISION_MODEL = "claude-sonnet-4-6";
+const TEXT_MODEL   = "claude-haiku-4-5-20251001"; // text-only calls
+async function callAI(content, apiKey, model) {
   // Claude.ai artifact proxy: no extra headers, just Content-Type + .json() response
   // Standalone with API key: add auth headers
   const headers = { "Content-Type": "application/json" };
@@ -194,7 +204,7 @@ async function callAI(content, apiKey) {
     headers["anthropic-version"] = "2023-06-01";
     headers["anthropic-dangerous-direct-browser-access"] = "true";
   }
-  const body = JSON.stringify({ model: AI_MODEL, max_tokens: 1000, messages: [{ role: "user", content }] });
+  const body = JSON.stringify({ model: model||AI_MODEL, max_tokens: 1000, messages: [{ role: "user", content }] });
   // Use the exact pattern from Claude.ai artifact docs: fetch then .json()
   let data;
   try {
@@ -235,7 +245,7 @@ async function aFood(imgs, ps, mt, desc, apiKey) {
       + "Reply ONLY with this JSON and nothing else:\n"
       + '{"type":"meal","name":"","kcal":0,"protein":0,"carbs":0,"fat":0,"notes":"","newProduct":null,"ingredients":[{"name":"Ingredient name","weightG":0}]}';
   }
-  return callAI([{ type:"text", text:prompt }, ...iBlks(compressed)], apiKey);
+  return callAI([{ type:"text", text:prompt }, ...iBlks(compressed)], apiKey, VISION_MODEL);
 }
 
 async function aAct(imgs, apiKey) {
@@ -243,7 +253,7 @@ async function aAct(imgs, apiKey) {
   return callAI([
     { type:"text", text:"Extract workout data from this fitness app screenshot.\nReply ONLY with JSON:\n{\"kcal\":0,\"actType\":\"run\",\"distanceKm\":null,\"durationMin\":null}" },
     ...iBlks(c),
-  ], apiKey);
+  ], apiKey, VISION_MODEL);
 }
 
 async function aPrep(imgs, ps, desc, apiKey) {
@@ -255,15 +265,15 @@ async function aPrep(imgs, ps, desc, apiKey) {
       + "Reply ONLY with JSON:\n"
       + '{"totalKcal":0,"totalProtein":0,"totalCarbs":0,"totalFat":0,"estimatedWeightG":0,"notes":""}' },
     ...iBlks(c),
-  ], apiKey);
+  ], apiKey, VISION_MODEL);
 }
 
 async function aLabel(imgs, apiKey) {
   const c = await prepImgs(imgs.slice(0,1));
   return callAI([
-    { type:"text", text:"Read this nutrition label. Extract values per 100g (convert from per-serving if needed).\nReply ONLY with JSON, no other text, no markdown:\n{\"name\":\"\",\"kcal\":0,\"p\":0,\"c\":0,\"f\":0}" },
+    { type:"text", text:"Read this nutrition label carefully.\n\nIMPORTANT: The product name is the BRAND + PRODUCT NAME printed on the front/back of the package (e.g. \"Julian Bakery ProGranola Clusters Peanut Butter\"). Do NOT use decorative slogans, ingredient text, or phrases like \"The Heart\" or \"Made with\".\n\nExtract the Nutrition Facts values and convert everything to per 100g (if label shows per serving, divide by serving size grams and multiply by 100).\n\nReply ONLY with JSON:\n{\"name\":\"Full Brand + Product Name\",\"kcal\":0,\"p\":0,\"c\":0,\"f\":0}" },
     ...iBlks(c),
-  ], apiKey);
+  ], apiKey, VISION_MODEL);
 }
 
 async function aAnalysis(imgs, profile, weight, trend, apiKey) {
@@ -288,7 +298,7 @@ async function aAnalysis(imgs, profile, weight, trend, apiKey) {
     + "{\"estimatedBfPct\":15,\"targetBfPct\":11,\"estimatedKgToGoal\":3,\"goalDateStr\":\"Jun 21 " + d.getFullYear() + "\","
     + "\"weeksToGoalDate\":8,\"neededKgPerWeek\":0.38,\"isAchievable\":true,\"verdict\":\"On track\","
     + "\"assessment\":\"text\",\"recommendations\":\"text\",\"targetWeight\":" + Math.round((weight||66)-3) + "}";
-  return callAI([{ type:"text", text:prompt }, ...iBlks(c)], apiKey);
+  return callAI([{ type:"text", text:prompt }, ...iBlks(c)], apiKey, VISION_MODEL);
 }
 
 // ── Primitives ────────────────────────────────────────────────────────────────
@@ -360,7 +370,7 @@ function MacroFields({form,setForm}){
 // ── Inline edit components ────────────────────────────────────────────────────
 function EditMealInline({meal,onSave,onCancel}){const [form,setForm]=useState({name:meal.name,kcal:String(meal.kcal),protein:String(meal.protein),carbs:String(meal.carbs),fat:String(meal.fat),notes:meal.notes||""});return(<div style={{background:C.faint,borderRadius:10,padding:"12px 12px 10px"}}><MacroFields form={form} setForm={setForm}/><div style={{display:"flex",gap:7,marginTop:10}}><button onClick={onCancel} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer",fontSize:12}}>Cancel</button><button onClick={()=>onSave({...meal,name:form.name,kcal:parseFloat(form.kcal)||0,protein:parseFloat(form.protein)||0,carbs:parseFloat(form.carbs)||0,fat:parseFloat(form.fat)||0,notes:form.notes})} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>Save</button></div></div>);}
 function EditActInline({act,onSave,onCancel}){const [label,setLabel]=useState(act.label);const [kcal,setKcal]=useState(String(act.kcal));const [dist,setDist]=useState(String(act.distanceKm||""));const [dur,setDur]=useState(String(act.durationMin||""));return(<div style={{background:C.faint,borderRadius:10,padding:"12px 12px 10px"}}><div style={{display:"flex",flexDirection:"column",gap:8}}><Field label="Label" value={label} onChange={setLabel}/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}><Field label="Kcal burned" value={kcal} onChange={setKcal} type="number"/><Field label="Distance km" value={dist} onChange={setDist} type="number"/><Field label="Duration min" value={dur} onChange={setDur} type="number"/></div></div><div style={{display:"flex",gap:7,marginTop:10}}><button onClick={onCancel} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer",fontSize:12}}>Cancel</button><button onClick={()=>onSave({...act,label,kcal:parseFloat(kcal)||0,distanceKm:parseFloat(dist)||null,durationMin:parseFloat(dur)||null})} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>Save</button></div></div>);}
-function AddMealManual({onAdd,onCancel}){const [form,setForm]=useState({name:"",kcal:"",protein:"",carbs:"",fat:"",notes:""});return(<div style={{background:C.faint,borderRadius:10,padding:"12px 12px 10px"}}><MacroFields form={form} setForm={setForm}/><div style={{display:"flex",gap:7,marginTop:10}}><button onClick={onCancel} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer",fontSize:12}}>Cancel</button><button onClick={()=>{if(!form.name&&!form.kcal)return;onAdd({id:Date.now(),name:form.name||"Meal",kcal:parseFloat(form.kcal)||0,protein:parseFloat(form.protein)||0,carbs:parseFloat(form.carbs)||0,fat:parseFloat(form.fat)||0,notes:form.notes,time:"--:--"});}} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>Add</button></div></div>);}
+function AddMealManual({onAdd,onCancel}){const [form,setForm]=useState({name:"",kcal:"",protein:"",carbs:"",fat:"",notes:""});const [mealType,setMealType]=useState("snack");return(<div style={{background:C.faint,borderRadius:10,padding:"12px 12px 10px"}}><div style={{display:"flex",gap:4,marginBottom:8}}>{MEAL_TYPES.map(mt=>(<button key={mt.id} onClick={()=>setMealType(mt.id)} style={{flex:1,padding:"5px 2px",borderRadius:7,border:`1px solid ${mealType===mt.id?C.lime:C.border}`,background:mealType===mt.id?`${C.lime}18`:C.bg,color:mealType===mt.id?C.lime:C.muted,cursor:"pointer",fontSize:8.5,textAlign:"center",lineHeight:1.4}}><div style={{fontSize:11}}>{mt.emoji}</div><div>{mt.label}</div></button>))}</div><MacroFields form={form} setForm={setForm}/><div style={{display:"flex",gap:7,marginTop:10}}><button onClick={onCancel} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer",fontSize:12}}>Cancel</button><button onClick={()=>{if(!form.name&&!form.kcal)return;onAdd({id:Date.now(),name:form.name||"Meal",kcal:parseFloat(form.kcal)||0,protein:parseFloat(form.protein)||0,carbs:parseFloat(form.carbs)||0,fat:parseFloat(form.fat)||0,notes:form.notes,mealType,time:"--:--"});}} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>Add</button></div></div>);}
 function AddActManual({onAdd,onCancel}){const [type,setType]=useState("run");const [label,setLabel]=useState("");const [kcal,setKcal]=useState("");const [dist,setDist]=useState("");const [dur,setDur]=useState("");return(<div style={{background:C.faint,borderRadius:10,padding:"12px 12px 10px"}}><div style={{display:"flex",gap:5,marginBottom:9}}>{[["🏋️","gym"],["🏃","run"],["🚶","walk"]].map(([ic,t])=>(<button key={t} onClick={()=>setType(t)} style={{flex:1,padding:"7px 4px",borderRadius:8,border:`1px solid ${type===t?C.lime:C.border}`,background:type===t?`${C.lime}20`:C.bg,color:type===t?C.lime:C.muted,fontWeight:type===t?700:500,cursor:"pointer",fontSize:12}}>{ic} {t}</button>))}</div><div style={{display:"flex",flexDirection:"column",gap:8}}><Field label="Label (optional)" value={label} onChange={setLabel} placeholder="auto-generated"/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}><Field label="Kcal burned" value={kcal} onChange={setKcal} type="number" placeholder="0"/><Field label="Distance km" value={dist} onChange={setDist} type="number"/><Field label="Duration min" value={dur} onChange={setDur} type="number"/></div></div><div style={{display:"flex",gap:7,marginTop:10}}><button onClick={onCancel} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer",fontSize:12}}>Cancel</button><button onClick={()=>{if(!kcal)return;onAdd({id:Date.now(),type,label:label||(type==="gym"?"Gym Session":`${type==="run"?"Run":"Walk"}${dist?` ${dist}km`:""}`),kcal:parseFloat(kcal)||0,distanceKm:parseFloat(dist)||null,durationMin:parseFloat(dur)||null,time:"--:--"});}} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>Add</button></div></div>);}
 
 function EditPrepSheet({prep,onSave,onClose}){
@@ -412,7 +422,7 @@ function AddIngredientRow({onAdd,products}) {
 }
 
 function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
-  const [mode,setMode]=useState("photos");const [mt,setMt]=useState("home");const [desc,setDesc]=useState("");const [imgs,setImgs]=useState([]);const [result,setResult]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState(null);const [form,setForm]=useState({name:"",kcal:"",protein:"",carbs:"",fat:"",notes:""});
+  const [mode,setMode]=useState("photos");const [mt,setMt]=useState("home");const [desc,setDesc]=useState("");const [imgs,setImgs]=useState([]);const [result,setResult]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState(null);const [form,setForm]=useState({name:"",kcal:"",protein:"",carbs:"",fat:"",notes:""});const [mealType,setMealType]=useState("breakfast");
   const activePreps=mealPreps.filter(p=>p.remaining>0);
   const [ingredients,setIngredients]=useState(null); // detected ingredients for confirmation
   const analyze=async()=>{setLoading(true);setErr(null);try{
@@ -449,11 +459,16 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
     setForm(f=>({...f,kcal:String(Math.round(totals.kcal)),protein:String(Math.round(totals.protein)),carbs:String(Math.round(totals.carbs)),fat:String(Math.round(totals.fat))}));
     setIngredients(null);
   };
-  const confirm=()=>{if(result?.type==="activity"){onAdd({type:"activity_from_meal",burnedKcal:result.burnedKcal});return;}const{newProduct,...meal}={id:Date.now(),name:form.name||"Meal",kcal:parseFloat(form.kcal)||0,protein:parseFloat(form.protein)||0,carbs:parseFloat(form.carbs)||0,fat:parseFloat(form.fat)||0,notes:form.notes,time:new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}),newProduct:result?.newProduct||null};onAdd({...meal,newProduct});};
+  const [aiNotes,setAiNotes]=useState(null);
+  const confirm=()=>{if(result?.type==="activity"){onAdd({type:"activity_from_meal",burnedKcal:result.burnedKcal});return;}const{newProduct,...meal}={id:Date.now(),mealType,name:form.name||"Meal",kcal:parseFloat(form.kcal)||0,protein:parseFloat(form.protein)||0,carbs:parseFloat(form.carbs)||0,fat:parseFloat(form.fat)||0,notes:form.notes,time:new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}),newProduct:result?.newProduct||null};onAdd({...meal,newProduct});};
   const usePrep=prep=>{const n=prep.portions-prep.remaining+1;onAdd({id:Date.now(),name:prep.name,kcal:prep.perKcal,protein:prep.perProtein,carbs:prep.perCarbs,fat:prep.perFat,notes:`Prep ${n}/${prep.portions}`,time:new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})});setMealPreps(ps=>ps.map(p=>p.id===prep.id?{...p,remaining:p.remaining-1}:p));};
   const canAnalyze=!loading&&imgs.length>0&&(mt==="canteen"?desc.trim().length>5:true);
   return(<Sheet onClose={onClose} title="Log Meal">
-    <div style={{display:"flex",gap:6,marginBottom:16}}>{[["📸 Photos","photos"],["✏️ Manual","manual"],["🍱 Prep","mealprep"]].map(([lbl,m])=>(<button key={m} onClick={()=>{setMode(m);setResult(null);}} style={{flex:1,padding:"8px 4px",borderRadius:10,border:`1px solid ${mode===m?C.lime:C.border}`,background:mode===m?`${C.lime}20`:C.card,color:mode===m?C.lime:C.muted,fontWeight:mode===m?700:500,cursor:"pointer",fontSize:12}}>{lbl}</button>))}</div>
+    <div style={{display:"flex",gap:6,marginBottom:10}}>{[["📸 Photos","photos"],["✏️ Manual","manual"],["🍱 Prep","mealprep"]].map(([lbl,m])=>(<button key={m} onClick={()=>{setMode(m);setResult(null);}} style={{flex:1,padding:"8px 4px",borderRadius:10,border:`1px solid ${mode===m?C.lime:C.border}`,background:mode===m?`${C.lime}20`:C.card,color:mode===m?C.lime:C.muted,fontWeight:mode===m?700:500,cursor:"pointer",fontSize:12}}>{lbl}</button>))}</div>
+    <div style={{marginBottom:14}}>
+      <div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Meal type</div>
+      <div style={{display:"flex",gap:5}}>{[["🌅","breakfast","Breakfast"],["☀️","lunch","Lunch"],["🌙","dinner","Dinner"],["🍎","snack","Snack"],["🥤","drink","Drink"]].map(([ic,id,lbl])=>{const active=mealType===id;return(<button key={id} onClick={()=>setMealType(id)} style={{flex:1,padding:"6px 2px",borderRadius:8,border:`1px solid ${active?C.lime:C.border}`,background:active?`${C.lime}18`:C.bg,color:active?C.lime:C.muted,fontWeight:active?700:400,cursor:"pointer",fontSize:9,lineHeight:1.5,textAlign:"center"}}><div style={{fontSize:13}}>{ic}</div><div>{lbl}</div></button>);})}</div>
+    </div>
     {mode==="photos"&&!result&&(<>
       <div style={{display:"flex",gap:6,marginBottom:10}}>{[["Home cooked","home"],["Canteen / Restaurant","canteen"]].map(([lbl,t])=>(<button key={t} onClick={()=>setMt(t)} style={{flex:1,padding:"8px 6px",borderRadius:8,border:`1px solid ${mt===t?C.lime:C.border}`,background:mt===t?`${C.lime}12`:C.bg,color:mt===t?C.lime:C.muted,fontWeight:mt===t?600:400,cursor:"pointer",fontSize:11}}>{lbl}</button>))}</div>
       <div style={{marginBottom:10}}>
@@ -496,8 +511,9 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
                 <button onClick={recalcFromIngredients} style={{flex:2,padding:"11px 0",borderRadius:10,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:15}}>Confirm Weights →</button>
               </div>
             </div>)
-          :<MacroFields form={form} setForm={setForm}/>
+          :(<>{aiNotes&&<div style={{background:"#0a1220",border:`1px solid ${C.blue}40`,borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:12,color:C.blue,lineHeight:1.5}}>💡 {aiNotes}</div>}<MacroFields form={form} setForm={setForm}/></>)
       }
+      {!ingredients&&result?.notes&&result.notes.length>3&&<div style={{background:"#0d1a0d",border:"1px solid #1a3a1a",borderRadius:8,padding:"9px 12px",marginTop:8,marginBottom:4}}><div style={{fontSize:10,color:C.lime,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:3}}>AI Notes</div><div style={{fontSize:12,color:"#a0d0a0",lineHeight:1.5}}>{result.notes}</div></div>}
       {!ingredients&&<div style={{display:"flex",gap:8,marginTop:12}}>
         <button onClick={()=>setResult(null)} style={{flex:1,padding:"11px 0",borderRadius:10,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer"}}>Back</button>
         <button onClick={confirm} style={{flex:2,padding:"11px 0",borderRadius:10,background:C.lime,color:"#000",fontWeight:700,border:"none",cursor:"pointer",fontSize:15}}>{result.type==="activity"?"Log as Activity":"Add to Log"}</button>
@@ -609,7 +625,7 @@ function TodayTab({dayData,setDayData,mealPreps,setMealPreps,products,setProduct
       {/* Meals */}
       <div><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>{dayData.meals.length} meals</div>
         <div style={{display:"flex",flexDirection:"column",gap:7}}>
-          {dayData.meals.map(m=><div key={m.id} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 14px",display:"flex",gap:10}}><div style={{flex:1,minWidth:0}}><div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:4}}><span style={{fontSize:14,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.name}</span><span style={{fontSize:10,color:C.muted,fontFamily:"monospace",flexShrink:0}}>{m.time}</span></div>{m.notes&&<div style={{fontSize:11,color:C.muted,marginBottom:5}}>{m.notes}</div>}<div style={{display:"flex",gap:10}}><Chip val={m.kcal} label="kcal" color={C.lime}/><Chip val={m.protein} label="P" color={C.blue}/><Chip val={m.carbs} label="C" color={C.orange}/><Chip val={m.fat} label="F" color={C.purple}/></div></div><button onClick={()=>setDayData(p=>({...p,meals:p.meals.filter(x=>x.id!==m.id)}))} style={{background:"none",border:"none",cursor:"pointer",color:C.faint,fontSize:18,padding:"0 2px",alignSelf:"center",lineHeight:1}}>×</button></div>)}
+          {dayData.meals.map(m=><div key={m.id} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 14px",display:"flex",gap:10}}><div style={{flex:1,minWidth:0}}><div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:4}}><span style={{fontSize:14,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{["🌅","☀️","🌙","🍎","🥤"][["breakfast","lunch","dinner","snack","drink"].indexOf(m.mealType)]||""} {m.name}</span><span style={{fontSize:10,color:C.muted,fontFamily:"monospace",flexShrink:0}}>{m.time}</span></div>{m.notes&&<div style={{fontSize:11,color:C.muted,marginBottom:5}}>{m.notes}</div>}<div style={{display:"flex",gap:10}}><Chip val={m.kcal} label="kcal" color={C.lime}/><Chip val={m.protein} label="P" color={C.blue}/><Chip val={m.carbs} label="C" color={C.orange}/><Chip val={m.fat} label="F" color={C.purple}/></div></div><button onClick={()=>setDayData(p=>({...p,meals:p.meals.filter(x=>x.id!==m.id)}))} style={{background:"none",border:"none",cursor:"pointer",color:C.faint,fontSize:18,padding:"0 2px",alignSelf:"center",lineHeight:1}}>×</button></div>)}
           {!dayData.meals.length&&<div style={{textAlign:"center",padding:"28px 0",color:C.muted,fontSize:14}}>Nothing logged yet.</div>}
         </div>
       </div>
@@ -789,7 +805,7 @@ function TestAPIButton({apiKey}) {
       headers["anthropic-version"] = "2023-06-01";
       headers["anthropic-dangerous-direct-browser-access"] = "true";
     }
-    const body = JSON.stringify({model: AI_MODEL, max_tokens: 20, messages: [{role:"user",content:"Reply with just OK"}]});
+    const body = JSON.stringify({model: VISION_MODEL, max_tokens: 20, messages: [{role:"user",content:"Reply with just OK"}]});
     let data;
     try {
       const response = await fetch("https://api.anthropic.com/v1/messages", {method:"POST",headers,body});
@@ -797,7 +813,7 @@ function TestAPIButton({apiKey}) {
     } catch(e) { setStatus({ok:false,msg:"Connection error: " + e.message}); setLoading(false); return; }
     if (data.error) { setStatus({ok:false,msg:"API error: "+data.error.message+" (type: "+data.error.type+")"}); setLoading(false); return; }
     if (!data.content) { setStatus({ok:false,msg:"No content field. Raw: "+JSON.stringify(data).slice(0,120)}); setLoading(false); return; }
-    setStatus({ok:true,msg:"Connected! Model: "+AI_MODEL+" | "+data.content[0]?.text}); setLoading(false);
+    setStatus({ok:true,msg:"Connected! Sonnet: "+VISION_MODEL+" | "+data.content[0]?.text}); setLoading(false);
   };
   return (<div>
     <button onClick={test} disabled={loading} style={{width:"100%",padding:"9px 0",borderRadius:8,background:loading?C.faint:C.blue,border:"none",color:"#000",fontWeight:700,cursor:loading?"default":"pointer",fontSize:13}}>{loading?"Testing…":"Test AI Connection"}</button>
@@ -856,7 +872,7 @@ function SettingsTab({profile,setProfile,weights,setWeights}){
     {/* Standalone API key + test */}
     <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"14px 16px",marginBottom:12}}>
       <div style={{fontSize:14,fontWeight:600,color:C.text,marginBottom:4}}>AI Connection</div>
-      <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Model: <span style={{fontFamily:"monospace",color:C.lime}}>{AI_MODEL}</span> · Running {inClaudeAI()?"inside Claude.ai (proxy auth)":"standalone (needs API key)"}</div>
+      <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Vision: <span style={{fontFamily:"monospace",color:C.lime}}>{VISION_MODEL}</span> · Text: <span style={{fontFamily:"monospace",color:C.muted}}>{TEXT_MODEL}</span> · Running {inClaudeAI()?"inside Claude.ai (proxy auth)":"standalone (needs API key)"}</div>
       <TestAPIButton apiKey={profile.apiKey}/>
       <div style={{marginTop:10}}><div style={{fontSize:11,color:C.muted,marginBottom:4}}>API Key (standalone only — leave blank in Claude.ai)</div><Field label="" value={profile.apiKey||""} onChange={v=>setProfile(p=>({...p,apiKey:v}))} placeholder="sk-ant-api03-..." type="password"/></div>
     </div>
