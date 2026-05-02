@@ -238,7 +238,7 @@ async function aFood(imgs, ps, mt, desc, apiKey) {
       + "Known products per 100g: " + ctx + "\n\n"
       + "CRITICAL RULES:\n"
       + "1. DESCRIPTION PRIORITY: if the description names a specific product or flavour, match it EXACTLY from known products list.\n"
-      + "2. SCALE VISIBLE: read the exact number on the digital display. Scale is zeroed per ingredient, reading = that ingredient weight only.\n"
+      + "2. SCALE VISIBLE: the scale number is ABSOLUTE TRUTH. Always use it. Never override it with a packaging weight or an estimate. The scale is zeroed per ingredient.\n"
       + "3. NO SCALE but whole packaged product shown (bar, jar, sachet): use the FULL PACKAGE WEIGHT printed on packaging (e.g. 55g bar = 55g). Read it from the package.\n"
       + "4. Egg shell visible = eggs already cracked in, scale shows their weight.\n"
       + "5. Identify EVERY ingredient across ALL " + compressed.length + " photos. Skip none.\n"
@@ -309,7 +309,7 @@ function Ring({value,max,color,label}){
     <div style={{position:"relative",width:s,height:s}}>
       <svg width={s} height={s} style={{transform:"rotate(-90deg)"}}>
         <circle cx={s/2} cy={s/2} r={r} fill="none" stroke={C.dim} strokeWidth={4.5}/>
-        <circle cx={s/2} cy={s/2} r={r} fill="none" stroke={over?C.red:color} strokeWidth={4.5} strokeDasharray={`${pct*circ} ${circ}`} strokeLinecap="round" style={{transition:"stroke-dasharray 0.5s"}}/>
+        <circle cx={s/2} cy={s/2} r={r} fill="none" stroke={(over&&label==="protein")?C.lime:over?C.red:color} strokeWidth={4.5} strokeDasharray={`${pct*circ} ${circ}`} strokeLinecap="round" style={{transition:"stroke-dasharray 0.5s"}}/>
       </svg>
       <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
         <span style={{fontSize:13,fontWeight:700,color:(over&&label==="protein")?C.lime:over?C.red:C.text,fontFamily:"monospace",lineHeight:1}}>{Math.round(value)}</span>
@@ -376,7 +376,16 @@ function AddActManual({onAdd,onCancel}){const [type,setType]=useState("run");con
 
 function EditPrepSheet({prep,onSave,onClose}){
   const [name,setName]=useState(prep.name);const [tK,setTK]=useState(String(prep.totalKcal));const [tP,setTP]=useState(String(prep.totalProtein));const [tC,setTC]=useState(String(prep.totalCarbs));const [tF,setTF]=useState(String(prep.totalFat));const [portions,setPortions]=useState(String(prep.portions));const [remaining,setRemaining]=useState(String(prep.remaining));const [wt,setWt]=useState(String(prep.totalWeightG||""));
-  const n=parseInt(portions)||1;const save=()=>{const pts=parseInt(portions)||1,rem=Math.min(parseInt(remaining)||0,pts),w=parseFloat(wt)||0,k=parseFloat(tK)||0,p=parseFloat(tP)||0,c=parseFloat(tC)||0,fat=parseFloat(tF)||0;onSave({...prep,name,totalKcal:k,totalProtein:p,totalCarbs:c,totalFat:fat,portions:pts,remaining:rem,totalWeightG:w,portionWeightG:w?Math.round(w/pts):0,perKcal:Math.round(k/pts),perProtein:Math.round(p/pts),perCarbs:Math.round(c/pts),perFat:Math.round(fat/pts)});};
+  const n=parseInt(portions)||1;const save=()=>{
+    const pts=parseInt(portions)||1,rem=Math.min(parseInt(remaining)||0,pts),w=parseFloat(wt)||0;
+    const k=parseFloat(tK)||0,p=parseFloat(tP)||0,cv=parseFloat(tC)||0,fat=parseFloat(tF)||0;
+    const per100k=w>0?Math.round(k/w*100):0,per100p=w>0?Math.round(p/w*100*10)/10:0,per100c=w>0?Math.round(cv/w*100*10)/10:0,per100f=w>0?Math.round(fat/w*100*10)/10:0;
+    const remG=w>0?Math.round(w*(rem/pts)):0;
+    onSave({...prep,name,totalKcal:k,totalProtein:p,totalCarbs:cv,totalFat:fat,portions:pts,remaining:rem,totalWeightG:w,
+      remainingWeightG:remG,targetPortions:pts,suggestedG:w?Math.round(w/pts):0,
+      per100Kcal:per100k,per100Protein:per100p,per100Carbs:per100c,per100Fat:per100f,
+      portionWeightG:w?Math.round(w/pts):0,perKcal:Math.round(k/pts),perProtein:Math.round(p/pts),perCarbs:Math.round(cv/pts),perFat:Math.round(fat/pts)});
+  };
   return(<Sheet onClose={onClose} title="Edit Prep"><div style={{display:"flex",flexDirection:"column",gap:9}}><Field label="Name" value={name} onChange={setName}/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}><Field label="Total Kcal" value={tK} onChange={setTK} type="number"/><Field label="Total Protein g" value={tP} onChange={setTP} type="number"/><Field label="Total Carbs g" value={tC} onChange={setTC} type="number"/><Field label="Total Fat g" value={tF} onChange={setTF} type="number"/><Field label="Total weight g" value={wt} onChange={setWt} type="number"/><Field label="Total portions" value={portions} onChange={setPortions} type="number"/></div><Field label="Portions remaining" value={remaining} onChange={setRemaining} type="number"/>{parseFloat(tK)>0&&n>0&&(<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px"}}><div style={{fontSize:11,color:C.muted,marginBottom:4}}>Per portion ({n})</div><div style={{display:"flex",gap:10}}><Chip val={(parseFloat(tK)||0)/n} label="kcal" color={C.lime}/><Chip val={(parseFloat(tP)||0)/n} label="P" color={C.blue}/><Chip val={(parseFloat(tC)||0)/n} label="C" color={C.orange}/><Chip val={(parseFloat(tF)||0)/n} label="F" color={C.purple}/></div></div>)}<div style={{display:"flex",gap:8,marginTop:4}}><button onClick={onClose} style={{flex:1,padding:"11px 0",borderRadius:10,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer"}}>Cancel</button><button onClick={save} style={{flex:2,padding:"11px 0",borderRadius:10,background:C.lime,color:"#000",fontWeight:700,border:"none",cursor:"pointer",fontSize:15}}>Save</button></div></div></Sheet>);
 }
 
@@ -422,6 +431,124 @@ function AddIngredientRow({onAdd,products}) {
   </div>);
 }
 
+
+// ── PrepEatPanel — gram-based, multi-prep combine ─────────────────────────────
+function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose}) {
+  const [selected,setSelected]=useState({}); // {prepId: gramsString}
+  const [extras,setExtras]=useState({name:"",kcal:"",protein:"",carbs:"",fat:""});
+  const [showExtras,setShowExtras]=useState(false);
+
+  const toggle=id=>{
+    setSelected(p=>{
+      if(p[id]!==undefined){const n={...p};delete n[id];return n;}
+      const prep=activePreps.find(x=>x.id===id);
+      const suggested=prep.suggestedG||prep.portionWeightG||Math.round((prep.remainingWeightG||prep.totalWeightG||0)/Math.max(prep.targetPortions||prep.portions||1,1));
+      return{...p,[id]:String(suggested)};
+    });
+  };
+
+  const macrosForPrep=(prep,grams)=>{
+    const g=parseFloat(grams)||0;
+    if(prep.per100Kcal&&prep.totalWeightG){
+      const scale=g/100;
+      return{kcal:Math.round(prep.per100Kcal*scale),protein:Math.round(prep.per100Protein*scale*10)/10,carbs:Math.round(prep.per100Carbs*scale*10)/10,fat:Math.round(prep.per100Fat*scale*10)/10};
+    }
+    // fallback: linear scale from total
+    const total=prep.totalWeightG||0;
+    if(!total)return{kcal:prep.perKcal||0,protein:prep.perProtein||0,carbs:prep.perCarbs||0,fat:prep.perFat||0};
+    const ratio=g/total;
+    return{kcal:Math.round((prep.totalKcal||0)*ratio),protein:Math.round((prep.totalProtein||0)*ratio*10)/10,carbs:Math.round((prep.totalCarbs||0)*ratio*10)/10,fat:Math.round((prep.totalFat||0)*ratio*10)/10};
+  };
+
+  const totals=Object.entries(selected).reduce((acc,[id,g])=>{
+    const prep=activePreps.find(x=>x.id===id);if(!prep)return acc;
+    const m=macrosForPrep(prep,g);
+    return{kcal:acc.kcal+m.kcal,protein:acc.protein+m.protein,carbs:acc.carbs+m.carbs,fat:acc.fat+m.fat};
+  },{kcal:0,protein:0,carbs:0,fat:0});
+  const grandTotals={kcal:totals.kcal+(parseFloat(extras.kcal)||0),protein:totals.protein+(parseFloat(extras.protein)||0),carbs:totals.carbs+(parseFloat(extras.carbs)||0),fat:totals.fat+(parseFloat(extras.fat)||0)};
+
+  const confirm=()=>{
+    if(!Object.keys(selected).length)return;
+    const names=Object.entries(selected).map(([id,g])=>{
+      const prep=activePreps.find(x=>x.id===id);return prep?`${prep.name} ${g}g`:"";
+    }).filter(Boolean);
+    if(extras.name)names.push(extras.name);
+    const label=names.join(" + ");
+    onAdd({id:Date.now(),name:label,kcal:Math.round(grandTotals.kcal),protein:Math.round(grandTotals.protein),carbs:Math.round(grandTotals.carbs),fat:Math.round(grandTotals.fat),mealType,notes:"Meal prep",time:new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})});
+    // Update remaining grams for each prep
+    setMealPreps(ps=>ps.map(p=>{
+      if(selected[p.id]===undefined)return p;
+      const used=parseFloat(selected[p.id])||0;
+      const remG=Math.max(0,(p.remainingWeightG??p.totalWeightG??0)-used);
+      const totalG=p.totalWeightG||0;
+      const newRemPct=totalG>0?remG/totalG:0;
+      const newRem=Math.max(0,Math.round((p.targetPortions||p.portions||1)*newRemPct));
+      return{...p,remainingWeightG:remG,remaining:newRem};
+    }));
+    onClose();
+  };
+
+  if(!activePreps.length)return(<div style={{textAlign:"center",padding:"28px 0",color:C.muted}}><div style={{fontSize:30}}>{"🍱"}</div><div style={{fontSize:13,marginTop:8}}>No active preps. Create one in the Food tab.</div></div>);
+
+  return(<div>
+    <div style={{fontSize:11,color:C.muted,marginBottom:8}}>Tap to select, enter grams eaten. Multi-select to combine.</div>
+    <div style={{display:"flex",flexDirection:"column",gap:7,marginBottom:10}}>
+      {activePreps.map(prep=>{
+        const isSelected=selected[prep.id]!==undefined;
+        const remG=prep.remainingWeightG??prep.totalWeightG??0;
+        const totalG=prep.totalWeightG||0;
+        const pct=totalG>0?Math.round(remG/totalG*100):0;
+        const suggested=prep.suggestedG||prep.portionWeightG||Math.round(remG/Math.max(prep.targetPortions||prep.portions||1,1));
+        const preview=isSelected?macrosForPrep(prep,selected[prep.id]):{};
+        return(<div key={prep.id} style={{background:C.card,border:`1px solid ${isSelected?C.lime:C.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer"}} onClick={()=>toggle(prep.id)}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:13,fontWeight:600,color:isSelected?C.lime:C.text}}>{prep.name}</div>
+              <div style={{fontSize:10,color:C.muted,marginTop:2}}>{Math.round(remG)}g left of {totalG}g · ~{pct}% · suggest {suggested}g/portion</div>
+              <div style={{height:3,background:C.dim,borderRadius:2,marginTop:4}}><div style={{height:"100%",width:`${pct}%`,background:C.lime,borderRadius:2}}/></div>
+            </div>
+            <div style={{width:20,height:20,borderRadius:"50%",border:`2px solid ${isSelected?C.lime:C.border}`,background:isSelected?C.lime:"none",display:"flex",alignItems:"center",justifyContent:"center",marginLeft:10,flexShrink:0}}>
+              {isSelected&&<span style={{fontSize:12,color:"#000",fontWeight:800}}>✓</span>}
+            </div>
+          </div>
+          {isSelected&&(<div style={{marginTop:8}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <input type="number" value={selected[prep.id]} onChange={e=>setSelected(p=>({...p,[prep.id]:e.target.value}))} placeholder={String(suggested)} style={{width:70,background:C.bg,border:`1px solid ${C.lime}`,borderRadius:6,padding:"6px 8px",color:C.lime,fontSize:14,fontFamily:"monospace",outline:"none",fontWeight:700}}/>
+              <span style={{fontSize:12,color:C.muted}}>g</span>
+              {parseFloat(selected[prep.id])>0&&<div style={{display:"flex",gap:8}}><Chip val={preview.kcal||0} label="kcal" color={C.lime}/><Chip val={preview.protein||0} label="P" color={C.blue}/></div>}
+            </div>
+          </div>)}
+        </div>);
+      })}
+    </div>
+
+    {/* Extras section */}
+    <button onClick={()=>setShowExtras(p=>!p)} style={{width:"100%",padding:"8px 0",borderRadius:8,background:"none",border:`1px dashed ${C.border}`,color:C.muted,cursor:"pointer",fontSize:12,marginBottom:8}}>
+      {showExtras?"▲ Hide extras":"+ Add extras (greens, sauce, etc.)"}
+    </button>
+    {showExtras&&<div style={{background:C.faint,borderRadius:10,padding:"10px 12px",marginBottom:10}}>
+      <Field label="Name (e.g. Green beans)" value={extras.name} onChange={v=>setExtras(p=>({...p,name:v}))} placeholder="Side dish"/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
+        <Field label="Kcal" value={extras.kcal} onChange={v=>setExtras(p=>({...p,kcal:v}))} type="number" placeholder="0"/>
+        <Field label="Protein g" value={extras.protein} onChange={v=>setExtras(p=>({...p,protein:v}))} type="number" placeholder="0"/>
+        <Field label="Carbs g" value={extras.carbs} onChange={v=>setExtras(p=>({...p,carbs:v}))} type="number" placeholder="0"/>
+        <Field label="Fat g" value={extras.fat} onChange={v=>setExtras(p=>({...p,fat:v}))} type="number" placeholder="0"/>
+      </div>
+    </div>}
+
+    {/* Total preview */}
+    {Object.keys(selected).length>0&&<div style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px",marginBottom:10}}>
+      <div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",marginBottom:5}}>Total</div>
+      <div style={{display:"flex",gap:10}}><Chip val={Math.round(grandTotals.kcal)} label="kcal" color={C.lime}/><Chip val={Math.round(grandTotals.protein)} label="P" color={C.blue}/><Chip val={Math.round(grandTotals.carbs)} label="C" color={C.orange}/><Chip val={Math.round(grandTotals.fat)} label="F" color={C.purple}/></div>
+    </div>}
+
+    <div style={{display:"flex",gap:8}}>
+      <button onClick={onClose} style={{flex:1,padding:"11px 0",borderRadius:10,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer"}}>Cancel</button>
+      <button onClick={confirm} disabled={!Object.keys(selected).length} style={{flex:2,padding:"11px 0",borderRadius:10,background:Object.keys(selected).length?C.lime:C.faint,color:"#000",fontWeight:700,border:"none",cursor:Object.keys(selected).length?"pointer":"default",fontSize:15}}>Log {Object.keys(selected).length>1?"Combined Prep":"Prep"}</button>
+    </div>
+  </div>);
+}
+
 function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
   const [mode,setMode]=useState("photos");const [mt,setMt]=useState("home");const [desc,setDesc]=useState("");const [imgs,setImgs]=useState([]);const [result,setResult]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState(null);const [form,setForm]=useState({name:"",kcal:"",protein:"",carbs:"",fat:"",notes:""});const [mealType,setMealType]=useState("breakfast");
   const activePreps=mealPreps.filter(p=>p.remaining>0);
@@ -461,7 +588,16 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
       const fat    = prod ? prod.f*scale    : (ing.fat||0)*scale;
       return{kcal:acc.kcal+kcal,protein:acc.protein+protein,carbs:acc.carbs+carbs,fat:acc.fat+fat};
     },{kcal:0,protein:0,carbs:0,fat:0});
-    setForm(f=>({...f,kcal:String(Math.round(totals.kcal)),protein:String(Math.round(totals.protein)),carbs:String(Math.round(totals.carbs)),fat:String(Math.round(totals.fat))}));
+    // Build confirmed ingredient summary for notes
+    const summary = ingredients.filter(i=>parseFloat(i.weightG)>0)
+      .map(i=>i.name+" "+i.weightG+"g").join(", ");
+    setForm(f=>({...f,
+      kcal:String(Math.round(totals.kcal)),
+      protein:String(Math.round(totals.protein)),
+      carbs:String(Math.round(totals.carbs)),
+      fat:String(Math.round(totals.fat)),
+      notes:summary
+    }));
     setIngredients(null);
   };
   const [aiNotes,setAiNotes]=useState(null);
@@ -488,7 +624,7 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
       {mt==="canteen"&&!desc.trim()&&<div style={{fontSize:11,color:C.muted,marginTop:5,textAlign:"center"}}>Add a description first</div>}
     </>)}
     {mode==="manual"&&!result&&(<><MacroFields form={form} setForm={setForm}/><div style={{display:"flex",gap:8,marginTop:14}}><button onClick={onClose} style={{flex:1,padding:"11px 0",borderRadius:10,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer"}}>Cancel</button><button onClick={confirm} style={{flex:2,padding:"11px 0",borderRadius:10,background:C.lime,color:"#000",fontWeight:700,border:"none",cursor:"pointer",fontSize:15}}>Add to Log</button></div></>)}
-    {mode==="mealprep"&&(activePreps.length===0?<div style={{textAlign:"center",padding:"28px 0",color:C.muted}}><div style={{fontSize:30}}>{"🍱"}</div><div style={{fontSize:13,marginTop:8}}>No active preps. Create one in the Food tab.</div></div>:<div style={{display:"flex",flexDirection:"column",gap:8}}>{activePreps.map(prep=>(<div key={prep.id} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}><div><div style={{fontSize:14,fontWeight:600,color:C.text}}>{prep.name}</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{prep.remaining}/{prep.portions} left</div><div style={{display:"flex",gap:8,marginTop:5}}><Chip val={prep.perKcal} label="kcal" color={C.lime}/><Chip val={prep.perProtein} label="P" color={C.blue}/></div></div><button onClick={()=>usePrep(prep)} style={{padding:"9px 14px",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:13}}>+ Use</button></div>))}</div>)}
+{mode==="mealprep"&&<PrepEatPanel activePreps={activePreps} setMealPreps={setMealPreps} mealType={mealType} onAdd={onAdd} onClose={onClose}/>}
     {result&&mode==="photos"&&(<>
       {result.type==="activity"
         ?<div style={{background:"#140e03",border:"1px solid #2e1e07",borderRadius:12,padding:"14px 16px",marginBottom:12}}><div style={{fontSize:12,color:C.muted}}>Activity detected</div><div style={{fontSize:32,fontWeight:800,fontFamily:"monospace",color:C.orange}}>−{Math.round(result.burnedKcal)} kcal</div></div>
@@ -540,7 +676,20 @@ function CreatePrepSheet({products,onSave,onClose,apiKey}){
   const f=k=>v=>setForm(p=>({...p,[k]:v}));
   const analyze=async()=>{setLoading(true);setErr(null);try{const res=await aPrep(imgs,products,desc,apiKey);setResult(res);setForm({kcal:String(Math.round(res.totalKcal)||""),protein:String(Math.round(res.totalProtein)||""),carbs:String(Math.round(res.totalCarbs)||""),fat:String(Math.round(res.totalFat)||"")});if(res.estimatedWeightG&&!wt)setWt(String(res.estimatedWeightG));}catch(e){setErr(String(e.message||e));}setLoading(false);};
   const portN=parseInt(portions)||1;
-  const save=()=>{const k=parseFloat(form.kcal)||0,p=parseFloat(form.protein)||0,c=parseFloat(form.carbs)||0,fat=parseFloat(form.fat)||0,n=parseInt(portions)||1,w=parseFloat(wt)||0;onSave({id:Date.now(),name:name||"Meal Prep",totalKcal:k,totalProtein:p,totalCarbs:c,totalFat:fat,totalWeightG:w,portions:n,remaining:n,portionWeightG:w?Math.round(w/n):0,perKcal:Math.round(k/n),perProtein:Math.round(p/n),perCarbs:Math.round(c/n),perFat:Math.round(fat/n),createdDate:TODAY(),notes:result?.notes||""});};
+  const save=()=>{
+    const k=parseFloat(form.kcal)||0,p=parseFloat(form.protein)||0,carb=parseFloat(form.carbs)||0,fat=parseFloat(form.fat)||0;
+    const n=parseInt(portions)||1,w=parseFloat(wt)||0;
+    const per100k=w>0?Math.round(k/w*100):0,per100p=w>0?Math.round(p/w*100*10)/10:0,per100c=w>0?Math.round(carb/w*100*10)/10:0,per100f=w>0?Math.round(fat/w*100*10)/10:0;
+    const suggestedG=w>0?Math.round(w/n):0;
+    onSave({id:Date.now(),name:name||"Meal Prep",totalKcal:k,totalProtein:p,totalCarbs:carb,totalFat:fat,
+      totalWeightG:w,remainingWeightG:w,targetPortions:n,
+      per100Kcal:per100k,per100Protein:per100p,per100Carbs:per100c,per100Fat:per100f,
+      suggestedG,
+      // legacy fields for backward compat
+      portions:n,remaining:n,portionWeightG:suggestedG,
+      perKcal:Math.round(k/n),perProtein:Math.round(p/n),perCarbs:Math.round(carb/n),perFat:Math.round(fat/n),
+      createdDate:TODAY(),notes:result?.notes||""});
+  };
   return(<Sheet onClose={onClose} title="Create Meal Prep"><Field label="Prep Name" value={name} onChange={setName} placeholder="e.g. Chicken rice bowl"/><div style={{marginTop:12}}><ImgZone imgs={imgs} setImgs={setImgs} maxPhotos={10}/></div><div style={{marginTop:10}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:4}}>Description (optional but helps)</div><textarea value={desc} onChange={e=>setDesc(e.target.value)} rows={2} placeholder="e.g. 500g chicken, 200g dry rice, peas, soy sauce" style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 11px",color:C.text,fontSize:13,outline:"none",resize:"none",fontFamily:"inherit"}}/></div>
   {!result?(<>{err&&<div style={{background:"#1e0a0a",border:"1px solid #5a1a1a",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#ff8080",margin:"10px 0",wordBreak:"break-word"}}>{err}</div>}<button onClick={analyze} disabled={!imgs.length||loading} style={{width:"100%",padding:"11px 0",borderRadius:10,background:imgs.length&&!loading?C.lime:C.faint,color:"#000",fontWeight:700,border:"none",cursor:imgs.length?"pointer":"default",fontSize:14,marginTop:12}}>{loading?"Analyzing…":`Analyze ${imgs.length} photo${imgs.length!==1?"s":""}`}</button><button onClick={()=>setResult(true)} style={{width:"100%",padding:"9px 0",borderRadius:10,background:"none",border:`1px solid ${C.border}`,color:C.muted,fontWeight:500,cursor:"pointer",fontSize:13,marginTop:6}}>Enter manually</button></>):(<><div style={{marginTop:12,display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}><Field label="Total Kcal" value={form.kcal} onChange={f("kcal")} type="number" placeholder="0"/><Field label="Total Protein g" value={form.protein} onChange={f("protein")} type="number" placeholder="0"/><Field label="Total Carbs g" value={form.carbs} onChange={f("carbs")} type="number" placeholder="0"/><Field label="Total Fat g" value={form.fat} onChange={f("fat")} type="number" placeholder="0"/><Field label="Total weight g" value={wt} onChange={setWt} type="number" placeholder="1200"/><Field label="Portions" value={portions} onChange={setPortions} type="number" placeholder="4"/></div>{parseFloat(form.kcal)>0&&portN>0&&(<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px",marginTop:10}}><div style={{fontSize:11,color:C.muted,marginBottom:4}}>Per portion ({portN})</div><div style={{display:"flex",gap:10}}><Chip val={(parseFloat(form.kcal)||0)/portN} label="kcal" color={C.lime}/><Chip val={(parseFloat(form.protein)||0)/portN} label="P" color={C.blue}/><Chip val={(parseFloat(form.carbs)||0)/portN} label="C" color={C.orange}/><Chip val={(parseFloat(form.fat)||0)/portN} label="F" color={C.purple}/></div></div>)}<div style={{display:"flex",gap:8,marginTop:14}}><button onClick={onClose} style={{flex:1,padding:"11px 0",borderRadius:10,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer"}}>Cancel</button><button onClick={save} style={{flex:2,padding:"11px 0",borderRadius:10,background:C.lime,color:"#000",fontWeight:700,border:"none",cursor:"pointer",fontSize:15}}>Save Prep</button></div></>)}
   </Sheet>);
@@ -625,7 +774,7 @@ function TodayTab({dayData,setDayData,mealPreps,setMealPreps,products,setProduct
       <div style={{marginBottom:12}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Tag today</div><div style={{display:"flex",flexWrap:"wrap",gap:5}}>{DAY_TAGS.map(tag=>{const active=(dayData.tags||[]).includes(tag.id);return(<button key={tag.id} onClick={()=>toggleTag(tag.id)} style={{padding:"5px 10px",borderRadius:20,border:`1px solid ${active?C.lime:C.border}`,background:active?`${C.lime}18`:C.bg,color:active?C.lime:C.muted,cursor:"pointer",fontSize:11}}>{tag.emoji} {tag.label}</button>);})}</div></div>
 
       {/* Active preps */}
-      {activePreps.length>0&&<div style={{marginBottom:12}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Active Preps</div><div style={{display:"flex",flexDirection:"column",gap:6}}>{activePreps.map(prep=><div key={prep.id} style={{background:C.card,border:`1px solid ${C.dim}`,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:13,fontWeight:600,color:C.text}}>{prep.name}</div><div style={{fontSize:10,color:C.muted,marginTop:2}}>{prep.remaining}/{prep.portions} left · <span style={{fontFamily:"monospace",color:C.lime}}>{prep.perKcal}kcal</span> · <span style={{fontFamily:"monospace",color:C.blue}}>P{prep.perProtein}g</span></div></div><button onClick={()=>{const n=prep.portions-prep.remaining+1;handleAdd({id:Date.now(),name:prep.name,kcal:prep.perKcal,protein:prep.perProtein,carbs:prep.perCarbs,fat:prep.perFat,notes:`Prep ${n}/${prep.portions}`,time:new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})});setMealPreps(ps=>ps.map(p=>p.id===prep.id?{...p,remaining:p.remaining-1}:p));}} style={{padding:"7px 13px",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Eat</button></div>)}</div></div>}
+      {activePreps.length>0&&<div style={{marginBottom:12}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Active Preps</div><div style={{display:"flex",flexDirection:"column",gap:6}}>{activePreps.map(prep=><div key={prep.id} style={{background:C.card,border:`1px solid ${C.dim}`,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:13,fontWeight:600,color:C.text}}>{prep.name}</div><div style={{fontSize:10,color:C.muted,marginTop:2}}>{Math.round(prep.remainingWeightG??prep.totalWeightG??0)}g left · <span style={{fontFamily:"monospace",color:C.lime}}>~{prep.suggestedG||prep.portionWeightG}g/portion</span></div></div><button onClick={()=>setModal("meal")} style={{padding:"7px 13px",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Eat</button></div>)}</div></div>}
 
       {/* Meals */}
       <div><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>{dayData.meals.length} meals</div>
@@ -694,7 +843,7 @@ function FoodTab({mealPreps,setMealPreps,products,setProducts,profile}){
   const saveEditP=()=>{const np={name:pForm.name,kcal:parseFloat(pForm.kcal)||0,p:parseFloat(pForm.p)||0,c:parseFloat(pForm.c)||0,f:parseFloat(pForm.f)||0};if(!np.name)return;setProducts(prev=>prev.map((x,i)=>i===editPIdx?np:x));setPForm({name:"",kcal:"",p:"",c:"",f:""});setEditPIdx(null);};
   const scanLabelFn=async()=>{setScanning(true);setScanErr(null);try{const res=await aLabel(scanImgs,profile.apiKey);if(res._unreadable){setPForm(f=>({...f,name:res.name||f.name}));setScanErr("Label was not clear enough to read — product name detected: \""+res.name+"\". Please enter macros manually.");}else{setPForm({name:res.name||"",kcal:String(Math.round(res.kcal)||""),p:String(res.p||""),c:String(res.c||""),f:String(res.f||"")});}}catch(e){setScanErr(String(e.message||e));}setScanning(false);};
   const filtered=products.filter(p=>p.name.toLowerCase().includes(search.toLowerCase()));
-  const PrepCard=({prep})=>(<div style={{background:C.card,border:`1px solid ${prep.remaining>0?C.border:C.dim}`,borderRadius:12,padding:"12px 14px",opacity:prep.remaining===0?0.55:1}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div style={{flex:1}}><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}><span style={{fontSize:14,fontWeight:600,color:C.text}}>{prep.name}</span>{prep.remaining>0?<span style={{fontSize:10,background:`${C.lime}20`,color:C.lime,padding:"2px 8px",borderRadius:20,fontFamily:"monospace",fontWeight:600}}>{prep.remaining} left</span>:<span style={{fontSize:10,background:C.dim,color:C.muted,padding:"2px 8px",borderRadius:20,fontFamily:"monospace"}}>done</span>}</div><div style={{fontSize:11,color:C.muted,marginBottom:6}}>{prep.portions} portions · {prep.portionWeightG}g each · {new Date(prep.createdDate+"T12:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</div><div style={{display:"flex",gap:10,marginBottom:6}}><Chip val={prep.perKcal} label="kcal" color={C.lime}/><Chip val={prep.perProtein} label="P" color={C.blue}/><Chip val={prep.perCarbs} label="C" color={C.orange}/><Chip val={prep.perFat} label="F" color={C.purple}/></div><div style={{height:4,background:C.dim,borderRadius:2}}><div style={{height:"100%",width:`${((prep.portions-prep.remaining)/prep.portions)*100}%`,background:prep.remaining>0?C.lime:C.muted,borderRadius:2}}/></div><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",marginTop:3}}>{prep.portions-prep.remaining}/{prep.portions} eaten</div></div><div style={{display:"flex",gap:6,marginLeft:8}}><button onClick={()=>setEditPrep(prep)} style={{background:"none",border:`1px solid ${C.border}`,color:C.muted,fontSize:13,cursor:"pointer",padding:"5px 8px",borderRadius:6,lineHeight:1}}>✎</button><button onClick={()=>setMealPreps(p=>p.filter(x=>x.id!==prep.id))} style={{background:"none",border:"none",color:C.faint,fontSize:17,cursor:"pointer",padding:"0 2px",lineHeight:1}}>×</button></div></div></div>);
+  const PrepCard=({prep})=>(<div style={{background:C.card,border:`1px solid ${prep.remaining>0?C.border:C.dim}`,borderRadius:12,padding:"12px 14px",opacity:prep.remaining===0?0.55:1}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div style={{flex:1}}><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}><span style={{fontSize:14,fontWeight:600,color:C.text}}>{prep.name}</span>{prep.remaining>0?<span style={{fontSize:10,background:`${C.lime}20`,color:C.lime,padding:"2px 8px",borderRadius:20,fontFamily:"monospace",fontWeight:600}}>{prep.remaining} left</span>:<span style={{fontSize:10,background:C.dim,color:C.muted,padding:"2px 8px",borderRadius:20,fontFamily:"monospace"}}>done</span>}</div><div style={{fontSize:11,color:C.muted,marginBottom:6}}>{prep.portions} portions · {prep.portionWeightG}g each · {new Date(prep.createdDate+"T12:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</div><div style={{display:"flex",gap:10,marginBottom:6}}><Chip val={prep.perKcal} label="kcal" color={C.lime}/><Chip val={prep.perProtein} label="P" color={C.blue}/><Chip val={prep.perCarbs} label="C" color={C.orange}/><Chip val={prep.perFat} label="F" color={C.purple}/></div><div style={{height:4,background:C.dim,borderRadius:2}}>{ (() => { const tw=prep.totalWeightG||0; const rw=prep.remainingWeightG??tw; const usedPct=tw>0?((tw-rw)/tw)*100:0; return <div style={{height:"100%",width:`${usedPct}%`,background:prep.remaining>0?C.lime:C.muted,borderRadius:2}}/>; })() }</div><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",marginTop:3}}>{Math.round((prep.totalWeightG||0)-(prep.remainingWeightG??prep.totalWeightG??0))}g / {prep.totalWeightG||0}g eaten</div></div><div style={{display:"flex",gap:6,marginLeft:8}}><button onClick={()=>setEditPrep(prep)} style={{background:"none",border:`1px solid ${C.border}`,color:C.muted,fontSize:13,cursor:"pointer",padding:"5px 8px",borderRadius:6,lineHeight:1}}>✎</button><button onClick={()=>setMealPreps(p=>p.filter(x=>x.id!==prep.id))} style={{background:"none",border:"none",color:C.faint,fontSize:17,cursor:"pointer",padding:"0 2px",lineHeight:1}}>×</button></div></div></div>);
   return(<div style={{height:"100%",position:"relative"}}>
     <div style={{height:"100%",overflowY:"auto",padding:"0 16px 90px"}}>
       <div style={{padding:"18px 0 14px"}}><div style={{fontSize:26,fontWeight:800,color:C.text,letterSpacing:"-0.03em"}}>Food</div><div style={{fontSize:12,color:C.muted}}>{active.length} active prep{active.length!==1?"s":""} · {products.length} products</div></div>
@@ -797,12 +946,12 @@ function HistoryTab({weights}){
             <span style={{fontSize:18}}>{dt.icon}</span>
             <div style={{flex:1}}>
               <div style={{display:"flex",alignItems:"center",gap:5}}><span style={{fontSize:13,fontWeight:600,color:C.text}}>{new Date(date+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}</span>{log.goalMode&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:10,background:log.goalMode==="cut"?`${C.orange}25`:log.goalMode==="bulk"?`${C.blue}25`:`${C.lime}25`,color:log.goalMode==="cut"?C.orange:log.goalMode==="bulk"?C.blue:C.lime,fontWeight:600,fontFamily:"monospace"}}>{log.goalMode}</span>}{tagEmojis.map((e,i)=><span key={i} style={{fontSize:12}}>{e}</span>)}</div>
-              <div style={{marginTop:4,height:3,background:C.dim,borderRadius:2,width:80}}><div style={{height:"100%",width:`${Math.min(totals.kcal/1700,1)*100}%`,background:C.lime,borderRadius:2}}/></div>
+              <div style={{marginTop:4,height:3,background:C.dim,borderRadius:2,width:80}}><div style={{height:"100%",width:`${Math.min(totals.kcal/Math.max(totals.kcal,1600),1)*100}%`,background:totals.kcal>=1400?C.lime:C.orange,borderRadius:2}}/></div>
             </div>
             {/* Weight shown in collapsed row */}
             {dayWeight&&<div style={{textAlign:"center"}}><div style={{fontFamily:"monospace",fontSize:12,fontWeight:700,color:C.lime}}>{dayWeight.toFixed(1)}kg</div><div style={{fontSize:9,color:C.muted}}>weight</div></div>}
             <div style={{textAlign:"right"}}>
-              <div style={{fontFamily:"monospace",fontSize:13,fontWeight:700,color:C.lime}}>{Math.round(totals.kcal)}<span style={{fontSize:10,marginLeft:3}}>{totals.kcal>0&&totals.kcal>=1400?"✅":"⬜"}</span></div>
+              <div style={{fontFamily:"monospace",fontSize:13,fontWeight:700,color:C.lime}}>{Math.round(totals.kcal)}<span style={{fontSize:10,marginLeft:3,color:totals.kcal>=1600?C.lime:totals.kcal>=1000?C.yellow:C.muted}}>{totals.kcal>=1600?"✓":totals.kcal>=800?"~":"○"}</span></div>
               <div style={{fontFamily:"monospace",fontSize:10,color:C.blue}}>{Math.round(totals.protein)}g P</div>
               {actKcal>0&&<div style={{fontFamily:"monospace",fontSize:10,color:C.orange}}>+{Math.round(actKcal)}</div>}
             </div>
