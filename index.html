@@ -172,23 +172,24 @@ async function prepImgs(imgs) {
   return out;
 }
 const iBlks = imgs => imgs.map(i=>({type:"image",source:{type:"base64",media_type:i.mt,data:i.data}}));
-const pCtx  = ps  => ps.slice(0,25).map(p=>`${p.name}:${p.kcal}kcal P${p.p}g C${p.c}g F${p.f}g`).join("; ");
+const pCtx  = ps  => ps.slice(0,30).map(p=>`${p.name}:${p.kcal}kcal P${p.p}g C${p.c}g F${p.f}g`).join("; ");
 
 function extractJSON(text) {
   if (!text) throw new Error("Empty response");
-  // Try direct parse
   const clean = text.trim().replace(/^```json\s*/,"").replace(/^```\s*/,"").replace(/\s*```$/,"").trim();
   try { return JSON.parse(clean); } catch {}
-  // Find outermost { ... }
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start !== -1 && end > start) {
-    try { return JSON.parse(text.slice(start, end+1)); } catch {}
-  }
-  // Find first complete JSON object with regex
+  const start = text.indexOf("{"); const end = text.lastIndexOf("}");
+  if (start !== -1 && end > start) { try { return JSON.parse(text.slice(start, end+1)); } catch {} }
   const m = text.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/);
   if (m) { try { return JSON.parse(m[0]); } catch {} }
-  throw new Error("AI returned text instead of JSON. Response: " + text.slice(0,120));
+  // AI refused but may have mentioned product name — return partial so UI can show it
+  const nameMatch = text.match(/["*]{0,2}([A-Z][\w\s&éàü\-]{3,50})["*]{0,2}/);
+  const name = nameMatch ? nameMatch[1].trim() : "";
+  // If it's a label read that failed, return empty label response so user can fill manually
+  if (text.toLowerCase().includes("cannot read") || text.toLowerCase().includes("can\'t read") || text.toLowerCase().includes("unable to")) {
+    return { name: name||"", kcal:0, p:0, c:0, f:0, _unreadable:true };
+  }
+  throw new Error("Could not parse AI response: " + text.slice(0,120));
 }
 
 const inClaudeAI = () => { try { return typeof window.storage !== "undefined"; } catch { return false; } };
@@ -232,18 +233,18 @@ async function aFood(imgs, ps, mt, desc, apiKey) {
       + "Reply ONLY with JSON, nothing else:\n"
       + '{"type":"meal","name":"","kcal":0,"protein":0,"carbs":0,"fat":0,"notes":"canteen estimate","newProduct":null}';
   } else {
-    prompt = "You are a precision nutrition analyst reading food photos with kitchen scales.\n"
-      + (desc ? "Dish: " + desc + "\n" : "")
+    prompt = "Precision nutrition analyst with kitchen scale photos.\n"
+      + (desc ? "MEAL DESCRIPTION — use this to identify ingredients and match products: " + desc + "\n" : "")
       + "Known products per 100g: " + ctx + "\n\n"
-      + "INSTRUCTIONS — follow these exactly:\n"
-      + "1. Each photo shows ONE ingredient on a CAMRY digital scale that has been ZEROED/TARED first.\n"
-      + "2. The scale reading in each photo = the EXACT weight of ONLY that ingredient. Do not subtract anything.\n"
-      + "3. Read the digital display number carefully — it shows grams.\n"
-      + "4. If you see an egg shell being held, the eggs have already been cracked in — the scale number IS the egg weight.\n"
-      + "5. Identify EVERY ingredient across ALL " + compressed.length + " photos — do not skip any photo.\n"
-      + "6. NEVER estimate weight — use only the number shown on the scale display.\n\n"
-      + "Reply ONLY with this JSON and nothing else:\n"
-      + '{"type":"meal","name":"","kcal":0,"protein":0,"carbs":0,"fat":0,"notes":"","newProduct":null,"ingredients":[{"name":"Ingredient name","weightG":0}]}';
+      + "CRITICAL RULES:\n"
+      + "1. DESCRIPTION PRIORITY: if the description names a specific product or flavour, match it EXACTLY from known products list.\n"
+      + "2. SCALE VISIBLE: read the exact number on the digital display. Scale is zeroed per ingredient, reading = that ingredient weight only.\n"
+      + "3. NO SCALE but whole packaged product shown (bar, jar, sachet): use the FULL PACKAGE WEIGHT printed on packaging (e.g. 55g bar = 55g). Read it from the package.\n"
+      + "4. Egg shell visible = eggs already cracked in, scale shows their weight.\n"
+      + "5. Identify EVERY ingredient across ALL " + compressed.length + " photos. Skip none.\n"
+      + "6. Unknown product: if label visible in photo, read it and populate newProduct with brand name and per-100g macros.\n\n"
+      + "Reply ONLY with this JSON:\n"
+      + '{"type":"meal","name":"","kcal":0,"protein":0,"carbs":0,"fat":0,"notes":"","newProduct":{"name":"","kcal":0,"p":0,"c":0,"f":0},"ingredients":[{"name":"","weightG":0}]}';
   }
   return callAI([{ type:"text", text:prompt }, ...iBlks(compressed)], apiKey, VISION_MODEL);
 }
@@ -271,7 +272,7 @@ async function aPrep(imgs, ps, desc, apiKey) {
 async function aLabel(imgs, apiKey) {
   const c = await prepImgs(imgs.slice(0,1));
   return callAI([
-    { type:"text", text:"Read this nutrition label carefully.\n\nIMPORTANT: The product name is the BRAND + PRODUCT NAME printed on the front/back of the package (e.g. \"Julian Bakery ProGranola Clusters Peanut Butter\"). Do NOT use decorative slogans, ingredient text, or phrases like \"The Heart\" or \"Made with\".\n\nExtract the Nutrition Facts values and convert everything to per 100g (if label shows per serving, divide by serving size grams and multiply by 100).\n\nReply ONLY with JSON:\n{\"name\":\"Full Brand + Product Name\",\"kcal\":0,\"p\":0,\"c\":0,\"f\":0}" },
+    { type:"text", text:"You MUST return ONLY a JSON object — no explanation text, no refusals, no markdown.\nTask: Read this nutrition label.\n1. Product name = brand + product name (e.g. \"Barebells Caramel Cashew\", \"Della Sante Dubai Chocolate Cream\"). Not slogans or body text.\n2. Per 100g values. If per serving: divide by serving_grams * 100.\n3. Carbs = Total Carbohydrate. Fat = Total Fat.\n4. If a value is unclear, use 0. If label is totally unreadable, still return JSON with name you can see and zeros.\n5. NEVER write explanation. Return exactly:\n{\"name\":\"\",\"kcal\":0,\"p\":0,\"c\":0,\"f\":0}" },
     ...iBlks(c),
   ], apiKey, VISION_MODEL);
 }
@@ -311,7 +312,7 @@ function Ring({value,max,color,label}){
         <circle cx={s/2} cy={s/2} r={r} fill="none" stroke={over?C.red:color} strokeWidth={4.5} strokeDasharray={`${pct*circ} ${circ}`} strokeLinecap="round" style={{transition:"stroke-dasharray 0.5s"}}/>
       </svg>
       <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-        <span style={{fontSize:13,fontWeight:700,color:over?C.red:C.text,fontFamily:"monospace",lineHeight:1}}>{Math.round(value)}</span>
+        <span style={{fontSize:13,fontWeight:700,color:(over&&label==="protein")?C.lime:over?C.red:C.text,fontFamily:"monospace",lineHeight:1}}>{Math.round(value)}</span>
         <span style={{fontSize:9,color:C.muted,fontFamily:"monospace"}}>/{Math.round(max)}</span>
       </div>
     </div>
@@ -446,8 +447,12 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
       const nameLower=ing.name.toLowerCase();
       const prod=products.find(p=>{
         const pl=p.name.toLowerCase();
-        const words=nameLower.split(/\s+/).filter(w=>w.length>2);
-        return words.some(w=>pl.includes(w));
+        // Bidirectional fuzzy match — ingredient name words in product, or product words in ingredient
+        const ingWords=nameLower.split(/\s+/).filter(w=>w.length>2);
+        const prodWords=pl.split(/\s+/).filter(w=>w.length>2);
+        // Score: count how many meaningful words overlap
+        const overlap=ingWords.filter(w=>pl.includes(w)).length + prodWords.filter(w=>nameLower.includes(w)).length;
+        return overlap >= 2 || (ingWords.length===1 && pl.includes(ingWords[0])) || pl===nameLower;
       });
       // Use product macros if found (accurate), else fall back to AI estimates scaled by weight
       const kcal   = prod ? prod.kcal*scale : (ing.kcal||0)*scale;
@@ -555,8 +560,8 @@ function TodayTab({dayData,setDayData,mealPreps,setMealPreps,products,setProduct
   const wDelta=todayW&&prevW?todayW.weight-prevW.weight:null;
   const logWeight=()=>{const w=parseFloat(wInput);if(!w)return;const e={date:TODAY(),weight:w};setWeights(p=>[e,...p.filter(x=>x.date!==e.date)].sort((a,b)=>b.date.localeCompare(a.date)));setWInput("");};
   const handleAdd=entry=>{
-    if(entry.type==="activity_from_meal"){setDayData(p=>({...p,burnedExtra:(p.burnedExtra||0)+entry.burnedKcal}));}
-    else{const{newProduct,...meal}=entry;setDayData(p=>({...p,meals:[...p.meals,meal]}));if(newProduct)setProducts(p=>p.find(x=>x.name.toLowerCase()===newProduct.name.toLowerCase())?p:[...p,newProduct]);}
+    if(entry.type==="activity_from_meal"){setDayData(p=>({...p,burnedExtra:(p.burnedExtra||0)+entry.burnedKcal,goalMode:profile.goal}));}
+    else{const{newProduct,...meal}=entry;setDayData(p=>({...p,meals:[...p.meals,meal],goalMode:profile.goal}));if(newProduct)setProducts(p=>p.find(x=>x.name.toLowerCase()===newProduct.name.toLowerCase())?p:[...p,newProduct]);}
     setModal(null);
   };
   const toggleTag=tagId=>{const tags=dayData.tags||[];setDayData(p=>({...p,tags:tags.includes(tagId)?tags.filter(t=>t!==tagId):[...tags,tagId]}));};
@@ -601,7 +606,7 @@ function TodayTab({dayData,setDayData,mealPreps,setMealPreps,products,setProduct
       {/* Day type */}
       <div style={{marginBottom:10}}>
         <div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:7}}>Day Type</div>
-        <div style={{display:"flex",gap:5}}>{Object.entries(DAY_TYPES).map(([key,val])=>{const active=dayData.dayType===key;const tKcal=getDT(profile,key,latestWeight,0,false).kcal;return(<button key={key} onClick={()=>setDayData(p=>({...p,dayType:key}))} style={{flex:1,padding:"7px 3px",borderRadius:10,border:`1px solid ${active?C.lime:C.border}`,background:active?`${C.lime}18`:C.card,color:active?C.lime:C.muted,fontWeight:active?700:400,cursor:"pointer",fontSize:9.5,lineHeight:1.4,textAlign:"center"}}><div style={{fontSize:14}}>{val.icon}</div><div>{val.label}</div><div style={{fontFamily:"monospace",fontSize:10,opacity:0.75,marginTop:1}}>{tKcal}</div></button>);})}</div>
+        <div style={{display:"flex",gap:5}}>{Object.entries(DAY_TYPES).map(([key,val])=>{const active=dayData.dayType===key;const tKcal=getDT(profile,key,latestWeight,0,false).kcal;return(<button key={key} onClick={()=>setDayData(p=>({...p,dayType:key,goalMode:profile.goal}))} style={{flex:1,padding:"7px 3px",borderRadius:10,border:`1px solid ${active?C.lime:C.border}`,background:active?`${C.lime}18`:C.card,color:active?C.lime:C.muted,fontWeight:active?700:400,cursor:"pointer",fontSize:9.5,lineHeight:1.4,textAlign:"center"}}><div style={{fontSize:14}}>{val.icon}</div><div>{val.label}</div><div style={{fontFamily:"monospace",fontSize:10,opacity:0.75,marginTop:1}}>{tKcal}</div></button>);})}</div>
       </div>
 
       {/* Macro rings */}
@@ -610,7 +615,7 @@ function TodayTab({dayData,setDayData,mealPreps,setMealPreps,products,setProduct
         <div style={{marginTop:14,paddingTop:12,borderTop:`1px solid ${C.border}`,display:"flex",justifyContent:"space-around",textAlign:"center"}}>
           <div><div style={{fontSize:22,fontWeight:800,fontFamily:"monospace",color:remKcal<0?C.red:C.lime,lineHeight:1}}>{Math.abs(Math.round(remKcal))}</div><div style={{fontSize:9,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginTop:3}}>{remKcal<0?"over":"left"} kcal</div></div>
           <div style={{width:1,background:C.border}}/>
-          <div><div style={{fontSize:22,fontWeight:800,fontFamily:"monospace",color:remProt<0?C.red:C.blue,lineHeight:1}}>{Math.abs(Math.round(remProt))}g</div><div style={{fontSize:9,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginTop:3}}>{remProt<0?"over":"left"} protein</div></div>
+          <div><div style={{fontSize:22,fontWeight:800,fontFamily:"monospace",color:remProt<0?C.lime:C.blue,lineHeight:1}}>{Math.abs(Math.round(remProt))}g</div><div style={{fontSize:9,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginTop:3}}>{remProt<0?"💪 extra":"left"} protein</div></div>
           <div style={{width:1,background:C.border}}/>
           <div><div style={{fontSize:22,fontWeight:800,fontFamily:"monospace",color:C.text,lineHeight:1}}>{Math.round(tot.kcal)}</div><div style={{fontSize:9,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginTop:3}}>consumed</div></div>
         </div>
@@ -636,18 +641,41 @@ function TodayTab({dayData,setDayData,mealPreps,setMealPreps,products,setProduct
 }
 
 // ── Activity Tab ──────────────────────────────────────────────────────────────
-function ActivityTab({dayData,setDayData,profile}){
+function ActivityTab({dayData,setDayData,profile,weights,setWeights}){
   const [modal,setModal]=useState(false);const [view,setView]=useState("today");const [histDates,setHistDates]=useState([]);const [histLogs,setHistLogs]=useState({});const [histLoaded,setHistLoaded]=useState(false);
   const activities=dayData.activities||[];const totalBurned=activities.reduce((s,a)=>s+a.kcal,0)+(dayData.burnedExtra||0);
   useEffect(()=>{if(view==="history"&&!histLoaded){store.get("fit_dates",[]).then(async ds=>{const e={};for(const d of ds.slice(0,30)){const log=await store.get(`fit_day_${d}`,null);if(log&&(log.activities||[]).length>0)e[d]=log;}setHistLogs(e);setHistDates(Object.keys(e).sort((a,b)=>b.localeCompare(a)));setHistLoaded(true);});}},[view]);
   const addActivity=act=>{setDayData(p=>({...p,activities:[...(p.activities||[]),act]}));setModal(false);};
   const delActivity=id=>{setDayData(p=>({...p,activities:(p.activities||[]).filter(a=>a.id!==id)}));};
+  const [wInput,setWInput]=useState("");const [editWIdx,setEditWIdx]=useState(null);const [editWVal,setEditWVal]=useState("");
+  const latestW=weights[0];const trend2=weights.length>=2?weights[0].weight-weights[1].weight:null;
+  const logWeight=()=>{const w=parseFloat(wInput);if(!w)return;const e={date:TODAY(),weight:w};setWeights(p=>[e,...p.filter(x=>x.date!==e.date)].sort((a,b)=>b.date.localeCompare(a.date)));setWInput("");};
+  const saveEditW=i=>{const w=parseFloat(editWVal);if(!w)return;setWeights(p=>{const n=[...p];n[i]={...n[i],weight:w};return n.sort((a,b)=>b.date.localeCompare(a.date));});setEditWIdx(null);};
   return(<div style={{height:"100%",position:"relative"}}>
     <div style={{height:"100%",overflowY:"auto",padding:"0 16px 90px"}}>
       <div style={{padding:"18px 0 8px"}}><div style={{fontSize:26,fontWeight:800,color:C.text,letterSpacing:"-0.03em"}}>Activity</div></div>
+      {/* Weight section */}
+      <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 14px",marginBottom:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+          <span style={{fontSize:11,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}>Weight Log</span>
+          {latestW&&<div style={{display:"flex",alignItems:"baseline",gap:6}}><span style={{fontFamily:"monospace",fontSize:18,fontWeight:800,color:C.lime}}>{latestW.weight.toFixed(2)}</span><span style={{fontSize:12,color:C.muted}}>kg</span>{trend2!==null&&<span style={{fontFamily:"monospace",fontSize:12,color:trend2<0?C.lime:C.red}}>{trend2<0?"↓":"↑"}{Math.abs(trend2).toFixed(2)}</span>}</div>}
+        </div>
+        <div style={{display:"flex",gap:8,marginBottom:8}}>
+          <input type="number" step="0.05" placeholder="Log weight (kg)" value={wInput} onChange={e=>setWInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&logWeight()} style={{flex:1,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"7px 10px",color:C.text,fontSize:14,fontFamily:"monospace",outline:"none"}}/>
+          <button onClick={logWeight} style={{padding:"7px 14px",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>Log</button>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:140,overflowY:"auto"}}>
+          {weights.slice(0,10).map((e,i)=>(<div key={e.date}>{editWIdx===i
+            ?<div style={{display:"flex",gap:6,alignItems:"center"}}><span style={{fontSize:11,color:C.muted,flexShrink:0,minWidth:70}}>{new Date(e.date+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}</span><input type="number" step="0.05" value={editWVal} onChange={ev=>setEditWVal(ev.target.value)} autoFocus style={{flex:1,background:C.bg,border:`1px solid ${C.lime}`,borderRadius:6,padding:"4px 7px",color:C.text,fontSize:13,fontFamily:"monospace",outline:"none"}}/><button onClick={()=>saveEditW(i)} style={{padding:"4px 9px",borderRadius:5,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:11}}>✓</button><button onClick={()=>setEditWIdx(null)} style={{padding:"4px 7px",borderRadius:5,background:"none",border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:11}}>✕</button></div>
+            :<div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:11,color:C.muted}}>{new Date(e.date+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}</span><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontFamily:"monospace",fontSize:12,fontWeight:700,color:i===0?C.lime:C.text}}>{e.weight.toFixed(2)} kg</span><button onClick={()=>{setEditWIdx(i);setEditWVal(String(e.weight));}} style={{background:"none",border:`1px solid ${C.border}`,color:C.muted,fontSize:10,cursor:"pointer",padding:"2px 5px",borderRadius:4}}>✎</button><button onClick={()=>setWeights(p=>p.filter((_,j)=>j!==i))} style={{background:"none",border:"none",color:C.faint,fontSize:13,cursor:"pointer",padding:"0 2px",lineHeight:1}}>×</button></div></div>
+          }</div>))}
+        </div>
+      </div>
       <div style={{display:"flex",gap:6,marginBottom:14}}>{[["Today","today"],["Past Activity","history"]].map(([lbl,v])=>(<button key={v} onClick={()=>setView(v)} style={{flex:1,padding:"9px 0",borderRadius:10,border:`1px solid ${view===v?C.orange:C.border}`,background:view===v?`${C.orange}20`:C.card,color:view===v?C.orange:C.muted,fontWeight:view===v?700:500,cursor:"pointer",fontSize:12}}>{lbl}</button>))}</div>
       {view==="today"&&(<>{totalBurned>0&&<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"14px 18px",marginBottom:14}}><div style={{fontSize:11,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}>Total burn bonus today</div><div style={{fontSize:40,fontWeight:900,fontFamily:"monospace",color:C.orange,lineHeight:1.1,marginTop:4}}>+{Math.round(totalBurned)}</div><div style={{fontSize:12,color:C.muted,marginTop:2}}>kcal added to daily target</div></div>}<div style={{display:"flex",flexDirection:"column",gap:7}}>{activities.map(a=><div key={a.id} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:22}}>{a.type==="gym"?"🏋️":a.type==="run"?"🏃":"🚶"}</span><div style={{flex:1,minWidth:0}}><div style={{display:"flex",alignItems:"baseline",gap:8}}><span style={{fontSize:14,fontWeight:600,color:C.text}}>{a.label}</span><span style={{fontSize:10,color:C.muted,fontFamily:"monospace"}}>{a.time}</span></div><div style={{display:"flex",gap:10,marginTop:4}}><span style={{fontFamily:"monospace",fontSize:12,color:C.orange}}>{Math.round(a.kcal)} kcal</span>{a.distanceKm&&<span style={{fontFamily:"monospace",fontSize:11,color:C.muted}}>{a.distanceKm}km</span>}{a.durationMin&&<span style={{fontFamily:"monospace",fontSize:11,color:C.muted}}>{a.durationMin}min</span>}</div></div><button onClick={()=>delActivity(a.id)} style={{background:"none",border:"none",cursor:"pointer",color:C.faint,fontSize:18,padding:"0 2px",lineHeight:1}}>×</button></div>)}{!activities.length&&<div style={{textAlign:"center",padding:"36px 0",color:C.muted}}><div style={{fontSize:32}}>{"🏋️"}</div><div style={{fontSize:14,marginTop:8}}>No activities today.</div></div>}</div></>)}
-      {view==="history"&&(<>{!histLoaded&&<div style={{textAlign:"center",padding:"40px 0",color:C.muted}}>Loading…</div>}{histLoaded&&histDates.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:C.muted}}>No past activities found.</div>}{histDates.map(date=>{const log=histLogs[date];const acts=log.activities||[];const totalK=acts.reduce((s,a)=>s+a.kcal,0);return(<div key={date} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"12px 14px",marginBottom:7}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><span style={{fontSize:13,fontWeight:600,color:C.text}}>{new Date(date+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}</span><span style={{fontFamily:"monospace",fontSize:13,fontWeight:700,color:C.orange}}>+{Math.round(totalK)} kcal</span></div><div style={{display:"flex",flexDirection:"column",gap:5}}>{acts.map(a=><div key={a.id} style={{display:"flex",alignItems:"center",gap:8,background:C.bg,borderRadius:8,padding:"8px 10px"}}><span style={{fontSize:16}}>{a.type==="gym"?"🏋️":a.type==="run"?"🏃":"🚶"}</span><div style={{flex:1}}><div style={{fontSize:13,color:C.text}}>{a.label}</div><div style={{display:"flex",gap:8,marginTop:2}}>{a.distanceKm&&<span style={{fontFamily:"monospace",fontSize:10,color:C.muted}}>{a.distanceKm}km</span>}{a.durationMin&&<span style={{fontFamily:"monospace",fontSize:10,color:C.muted}}>{a.durationMin}min</span>}</div></div><span style={{fontFamily:"monospace",fontSize:12,color:C.orange}}>{Math.round(a.kcal)}kcal</span></div>)}</div></div>);})}</>)}
+      {view==="history"&&(<>
+        <div style={{marginBottom:10,display:"flex",justifyContent:"flex-end"}}><span style={{fontSize:11,color:C.muted}}>To add activity to a past day, expand it in the History tab.</span></div>
+        {!histLoaded&&<div style={{textAlign:"center",padding:"40px 0",color:C.muted}}>Loading…</div>}{histLoaded&&histDates.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:C.muted}}>No past activities found.</div>}{histDates.map(date=>{const log=histLogs[date];const acts=log.activities||[];const totalK=acts.reduce((s,a)=>s+a.kcal,0);return(<div key={date} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"12px 14px",marginBottom:7}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><span style={{fontSize:13,fontWeight:600,color:C.text}}>{new Date(date+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}</span><span style={{fontFamily:"monospace",fontSize:13,fontWeight:700,color:C.orange}}>+{Math.round(totalK)} kcal</span></div><div style={{display:"flex",flexDirection:"column",gap:5}}>{acts.map(a=><div key={a.id} style={{display:"flex",alignItems:"center",gap:8,background:C.bg,borderRadius:8,padding:"8px 10px"}}><span style={{fontSize:16}}>{a.type==="gym"?"🏋️":a.type==="run"?"🏃":"🚶"}</span><div style={{flex:1}}><div style={{fontSize:13,color:C.text}}>{a.label}</div><div style={{display:"flex",gap:8,marginTop:2}}>{a.distanceKm&&<span style={{fontFamily:"monospace",fontSize:10,color:C.muted}}>{a.distanceKm}km</span>}{a.durationMin&&<span style={{fontFamily:"monospace",fontSize:10,color:C.muted}}>{a.durationMin}min</span>}</div></div><span style={{fontFamily:"monospace",fontSize:12,color:C.orange}}>{Math.round(a.kcal)}kcal</span></div>)}</div></div>);})}</>)}
     </div>
     {view==="today"&&<button onClick={()=>setModal(true)} style={{position:"absolute",bottom:16,right:16,width:54,height:54,borderRadius:"50%",background:C.orange,border:"none",cursor:"pointer",fontSize:28,color:"#000",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 0 20px ${C.orange}55`,zIndex:10}}>+</button>}
     {modal&&<AddActSheet onAdd={addActivity} onClose={()=>setModal(false)} apiKey={profile.apiKey}/>}
@@ -664,7 +692,7 @@ function FoodTab({mealPreps,setMealPreps,products,setProducts,profile}){
   const addProduct=()=>{const np={name:pForm.name,kcal:parseFloat(pForm.kcal)||0,p:parseFloat(pForm.p)||0,c:parseFloat(pForm.c)||0,f:parseFloat(pForm.f)||0};if(!np.name)return;setProducts(prev=>prev.find(x=>x.name.toLowerCase()===np.name.toLowerCase())?prev:[...prev,np]);setPForm({name:"",kcal:"",p:"",c:"",f:""});setScanImgs([]);setShowAdd(false);setEditPIdx(null);};
   const startEditP=i=>{const p=products[i];setPForm({name:p.name,kcal:String(p.kcal),p:String(p.p),c:String(p.c),f:String(p.f)});setEditPIdx(i);setShowAdd(false);};
   const saveEditP=()=>{const np={name:pForm.name,kcal:parseFloat(pForm.kcal)||0,p:parseFloat(pForm.p)||0,c:parseFloat(pForm.c)||0,f:parseFloat(pForm.f)||0};if(!np.name)return;setProducts(prev=>prev.map((x,i)=>i===editPIdx?np:x));setPForm({name:"",kcal:"",p:"",c:"",f:""});setEditPIdx(null);};
-  const scanLabelFn=async()=>{setScanning(true);setScanErr(null);try{const res=await aLabel(scanImgs,profile.apiKey);setPForm({name:res.name||"",kcal:String(Math.round(res.kcal)||""),p:String(res.p||""),c:String(res.c||""),f:String(res.f||"")});}catch(e){setScanErr(String(e.message||e));}setScanning(false);};
+  const scanLabelFn=async()=>{setScanning(true);setScanErr(null);try{const res=await aLabel(scanImgs,profile.apiKey);if(res._unreadable){setPForm(f=>({...f,name:res.name||f.name}));setScanErr("Label was not clear enough to read — product name detected: \""+res.name+"\". Please enter macros manually.");}else{setPForm({name:res.name||"",kcal:String(Math.round(res.kcal)||""),p:String(res.p||""),c:String(res.c||""),f:String(res.f||"")});}}catch(e){setScanErr(String(e.message||e));}setScanning(false);};
   const filtered=products.filter(p=>p.name.toLowerCase().includes(search.toLowerCase()));
   const PrepCard=({prep})=>(<div style={{background:C.card,border:`1px solid ${prep.remaining>0?C.border:C.dim}`,borderRadius:12,padding:"12px 14px",opacity:prep.remaining===0?0.55:1}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div style={{flex:1}}><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}><span style={{fontSize:14,fontWeight:600,color:C.text}}>{prep.name}</span>{prep.remaining>0?<span style={{fontSize:10,background:`${C.lime}20`,color:C.lime,padding:"2px 8px",borderRadius:20,fontFamily:"monospace",fontWeight:600}}>{prep.remaining} left</span>:<span style={{fontSize:10,background:C.dim,color:C.muted,padding:"2px 8px",borderRadius:20,fontFamily:"monospace"}}>done</span>}</div><div style={{fontSize:11,color:C.muted,marginBottom:6}}>{prep.portions} portions · {prep.portionWeightG}g each · {new Date(prep.createdDate+"T12:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"short"})}</div><div style={{display:"flex",gap:10,marginBottom:6}}><Chip val={prep.perKcal} label="kcal" color={C.lime}/><Chip val={prep.perProtein} label="P" color={C.blue}/><Chip val={prep.perCarbs} label="C" color={C.orange}/><Chip val={prep.perFat} label="F" color={C.purple}/></div><div style={{height:4,background:C.dim,borderRadius:2}}><div style={{height:"100%",width:`${((prep.portions-prep.remaining)/prep.portions)*100}%`,background:prep.remaining>0?C.lime:C.muted,borderRadius:2}}/></div><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",marginTop:3}}>{prep.portions-prep.remaining}/{prep.portions} eaten</div></div><div style={{display:"flex",gap:6,marginLeft:8}}><button onClick={()=>setEditPrep(prep)} style={{background:"none",border:`1px solid ${C.border}`,color:C.muted,fontSize:13,cursor:"pointer",padding:"5px 8px",borderRadius:6,lineHeight:1}}>✎</button><button onClick={()=>setMealPreps(p=>p.filter(x=>x.id!==prep.id))} style={{background:"none",border:"none",color:C.faint,fontSize:17,cursor:"pointer",padding:"0 2px",lineHeight:1}}>×</button></div></div></div>);
   return(<div style={{height:"100%",position:"relative"}}>
@@ -673,7 +701,7 @@ function FoodTab({mealPreps,setMealPreps,products,setProducts,profile}){
       <div style={{marginBottom:16}}><div style={{fontSize:11,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Meal Preps</div>{mealPreps.length===0&&<div style={{textAlign:"center",padding:"16px 0",color:C.muted,fontSize:13}}>No meal preps yet. Tap + to create.</div>}{active.length>0&&<div style={{marginBottom:8}}><div style={{display:"flex",flexDirection:"column",gap:8}}>{active.map(p=><PrepCard key={p.id} prep={p}/>)}</div></div>}{done.length>0&&<div><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Finished</div><div style={{display:"flex",flexDirection:"column",gap:8}}>{done.map(p=><PrepCard key={p.id} prep={p}/>)}</div></div>}</div>
       <button onClick={()=>setShowProd(p=>!p)} style={{width:"100%",padding:"12px 16px",borderRadius:12,background:C.card,border:`1px solid ${showProd?C.lime:C.border}`,color:showProd?C.lime:C.text,fontWeight:600,cursor:"pointer",fontSize:13,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:showProd?10:0}}><span>Product Labels ({products.length})</span><span style={{fontSize:11}}>{showProd?"▲":"▼"}</span></button>
       {showProd&&<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><span style={{fontSize:11,color:C.muted}}>per 100g</span><button onClick={()=>{setShowAdd(p=>!p);setEditPIdx(null);setPForm({name:"",kcal:"",p:"",c:"",f:""});setScanImgs([]);}} style={{padding:"7px 14px",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Add</button></div><input placeholder="Search products…" value={search} onChange={e=>setSearch(e.target.value)} style={{width:"100%",boxSizing:"border-box",background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"9px 14px",color:C.text,fontSize:13,outline:"none",marginBottom:8}}/>
-      {(showAdd||editPIdx!==null)&&<div style={{background:C.card,border:`1px solid ${editPIdx!==null?C.lime:C.border}`,borderRadius:12,padding:"14px 16px",marginBottom:10}}><div style={{fontSize:11,color:editPIdx!==null?C.lime:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>{editPIdx!==null?"Editing product":"New product"}</div>{showAdd&&editPIdx===null&&<div style={{marginBottom:10}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Scan Nutrition Label</div><ImgZone imgs={scanImgs} setImgs={setScanImgs} compact/>{scanImgs.length>0&&<button onClick={scanLabelFn} disabled={scanning} style={{width:"100%",padding:"9px 0",borderRadius:8,background:scanning?C.faint:C.blue,color:"#000",fontWeight:700,border:"none",cursor:scanning?"default":"pointer",fontSize:13,marginTop:8}}>{scanning?"Reading label…":"Read Label"}</button>}{scanErr&&<div style={{fontSize:11,color:"#ff8080",marginTop:6,wordBreak:"break-word"}}>{scanErr}</div>}</div>}<div style={{display:"flex",flexDirection:"column",gap:8}}><Field label="Product name" value={pForm.name} onChange={pff("name")} placeholder="e.g. Lidl Greek Yogurt"/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><Field label="Kcal/100g" value={pForm.kcal} onChange={pff("kcal")} type="number" placeholder="0"/><Field label="Protein g" value={pForm.p} onChange={pff("p")} type="number" placeholder="0"/><Field label="Carbs g" value={pForm.c} onChange={pff("c")} type="number" placeholder="0"/><Field label="Fat g" value={pForm.f} onChange={pff("f")} type="number" placeholder="0"/></div><div style={{display:"flex",gap:8}}><button onClick={()=>{setShowAdd(false);setEditPIdx(null);setPForm({name:"",kcal:"",p:"",c:"",f:""});setScanImgs([]);}} style={{flex:1,padding:"9px 0",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:13}}>Cancel</button><button onClick={editPIdx!==null?saveEditP:addProduct} style={{flex:2,padding:"9px 0",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:13}}>{editPIdx!==null?"Save":"Save Product"}</button></div></div></div>}
+      {(showAdd||editPIdx!==null)&&<div style={{background:C.card,border:`1px solid ${editPIdx!==null?C.lime:C.border}`,borderRadius:12,padding:"14px 16px",marginBottom:10}}><div style={{fontSize:11,color:editPIdx!==null?C.lime:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>{editPIdx!==null?"Editing product":"New product"}</div>{showAdd&&editPIdx===null&&<div style={{marginBottom:10}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Scan Nutrition Label</div><ImgZone imgs={scanImgs} setImgs={setScanImgs} compact/>{scanImgs.length>0&&<button onClick={scanLabelFn} disabled={scanning} style={{width:"100%",padding:"9px 0",borderRadius:8,background:scanning?C.faint:C.blue,color:"#000",fontWeight:700,border:"none",cursor:scanning?"default":"pointer",fontSize:13,marginTop:8}}>{scanning?"Reading label…":"Read Label"}</button>}{scanErr&&<div style={{fontSize:11,color:"#ff8080",marginTop:6,wordBreak:"break-word"}}>{scanErr.includes("unreadable")?"Label unreadable — please enter values manually below":scanErr}</div>}</div>}<div style={{display:"flex",flexDirection:"column",gap:8}}><Field label="Product name" value={pForm.name} onChange={pff("name")} placeholder="e.g. Lidl Greek Yogurt"/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><Field label="Kcal/100g" value={pForm.kcal} onChange={pff("kcal")} type="number" placeholder="0"/><Field label="Protein g" value={pForm.p} onChange={pff("p")} type="number" placeholder="0"/><Field label="Carbs g" value={pForm.c} onChange={pff("c")} type="number" placeholder="0"/><Field label="Fat g" value={pForm.f} onChange={pff("f")} type="number" placeholder="0"/></div><div style={{display:"flex",gap:8}}><button onClick={()=>{setShowAdd(false);setEditPIdx(null);setPForm({name:"",kcal:"",p:"",c:"",f:""});setScanImgs([]);}} style={{flex:1,padding:"9px 0",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:13}}>Cancel</button><button onClick={editPIdx!==null?saveEditP:addProduct} style={{flex:2,padding:"9px 0",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:13}}>{editPIdx!==null?"Save":"Save Product"}</button></div></div></div>}
       <div style={{display:"flex",flexDirection:"column",gap:5}}>{filtered.map((p,i)=>{const ri=products.indexOf(p);return(<div key={i} style={{background:C.card,border:`1px solid ${editPIdx===ri?C.lime:C.border}`,borderRadius:10,padding:"9px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:12,color:C.text,flex:1,marginRight:8,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</span><div style={{display:"flex",gap:5,alignItems:"center",flexShrink:0}}><div style={{display:"flex",gap:6}}><Chip val={p.kcal} label="k" color={C.lime}/><Chip val={p.p} label="P" color={C.blue}/><Chip val={p.c} label="C" color={C.orange}/><Chip val={p.f} label="F" color={C.purple}/></div><button onClick={()=>startEditP(ri)} style={{background:"none",border:`1px solid ${C.border}`,color:C.muted,fontSize:11,cursor:"pointer",padding:"3px 6px",borderRadius:5,marginLeft:3}}>✎</button><button onClick={()=>setProducts(prev=>prev.filter((_,j)=>j!==ri))} style={{background:"none",border:"none",color:C.faint,fontSize:14,cursor:"pointer",padding:"0 2px",lineHeight:1}}>×</button></div></div>);})}</div></div>}
     </div>
     <button onClick={()=>setModal(true)} style={{position:"absolute",bottom:16,right:16,width:54,height:54,borderRadius:"50%",background:C.lime,border:"none",cursor:"pointer",fontSize:28,color:"#000",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 0 20px ${C.lime}55`,zIndex:10}}>+</button>
@@ -768,13 +796,13 @@ function HistoryTab({weights}){
           <button onClick={()=>setExpanded(isExp?null:date)} style={{width:"100%",padding:"12px 14px",background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:10,textAlign:"left"}}>
             <span style={{fontSize:18}}>{dt.icon}</span>
             <div style={{flex:1}}>
-              <div style={{display:"flex",alignItems:"center",gap:5}}><span style={{fontSize:13,fontWeight:600,color:C.text}}>{new Date(date+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}</span>{tagEmojis.map((e,i)=><span key={i} style={{fontSize:12}}>{e}</span>)}</div>
+              <div style={{display:"flex",alignItems:"center",gap:5}}><span style={{fontSize:13,fontWeight:600,color:C.text}}>{new Date(date+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}</span>{log.goalMode&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:10,background:log.goalMode==="cut"?`${C.orange}25`:log.goalMode==="bulk"?`${C.blue}25`:`${C.lime}25`,color:log.goalMode==="cut"?C.orange:log.goalMode==="bulk"?C.blue:C.lime,fontWeight:600,fontFamily:"monospace"}}>{log.goalMode}</span>}{tagEmojis.map((e,i)=><span key={i} style={{fontSize:12}}>{e}</span>)}</div>
               <div style={{marginTop:4,height:3,background:C.dim,borderRadius:2,width:80}}><div style={{height:"100%",width:`${Math.min(totals.kcal/1700,1)*100}%`,background:C.lime,borderRadius:2}}/></div>
             </div>
             {/* Weight shown in collapsed row */}
             {dayWeight&&<div style={{textAlign:"center"}}><div style={{fontFamily:"monospace",fontSize:12,fontWeight:700,color:C.lime}}>{dayWeight.toFixed(1)}kg</div><div style={{fontSize:9,color:C.muted}}>weight</div></div>}
             <div style={{textAlign:"right"}}>
-              <div style={{fontFamily:"monospace",fontSize:13,fontWeight:700,color:C.lime}}>{Math.round(totals.kcal)}</div>
+              <div style={{fontFamily:"monospace",fontSize:13,fontWeight:700,color:C.lime}}>{Math.round(totals.kcal)}<span style={{fontSize:10,marginLeft:3}}>{totals.kcal>0&&totals.kcal>=1400?"✅":"⬜"}</span></div>
               <div style={{fontFamily:"monospace",fontSize:10,color:C.blue}}>{Math.round(totals.protein)}g P</div>
               {actKcal>0&&<div style={{fontFamily:"monospace",fontSize:10,color:C.orange}}>+{Math.round(actKcal)}</div>}
             </div>
@@ -992,7 +1020,7 @@ function App(){
   const today=TODAY();
   useEffect(()=>{(async()=>{
     const prods=await store.get("fit_products",null)||PRESETS;
-    const day=await store.get(`fit_day_${today}`,{date:today,dayType:"rest",meals:[],activities:[],burnedExtra:0,tags:[]});
+    const day=await store.get(`fit_day_${today}`,{date:today,dayType:"rest",meals:[],activities:[],burnedExtra:0,tags:[],goalMode:null});
     if(!day.activities)day.activities=[];if(!day.tags)day.tags=[];
     const wts=await store.get("fit_weights",[]);const preps=await store.get("fit_mealpreps",[]);
     const prof=await store.get("fit_profile",null)||DEFAULT_PROFILE;const photos=await store.get("fit_photos",[]);
@@ -1012,7 +1040,7 @@ function App(){
     <style>{`*{-webkit-tap-highlight-color:transparent;box-sizing:border-box}input,textarea{color-scheme:dark}::-webkit-scrollbar{display:none}button:active{opacity:0.82}`}</style>
     <div style={{flex:1,overflow:"hidden"}}>
       {tab==="today"&&<TodayTab dayData={dayData} setDayData={setDayData} mealPreps={mealPreps} setMealPreps={setMealPreps} products={products} setProducts={setProducts} profile={profile} latestWeight={latestWeight} weights={weights} setWeights={setWeights} onGoToSettings={()=>setTab("settings")}/>}
-      {tab==="activity"&&<ActivityTab dayData={dayData} setDayData={setDayData} profile={profile}/>}
+      {tab==="activity"&&<ActivityTab dayData={dayData} setDayData={setDayData} profile={profile} weights={weights} setWeights={setWeights}/>}
       {tab==="food"&&<FoodTab mealPreps={mealPreps} setMealPreps={setMealPreps} products={products} setProducts={setProducts} profile={profile}/>}
       {tab==="analysis"&&<AnalysisTab weights={weights} profile={profile} setProfile={setProfile} progressPhotos={progressPhotos} setProgressPhotos={setProgressPhotos}/>}
       {tab==="history"&&<HistoryTab weights={weights}/>}
