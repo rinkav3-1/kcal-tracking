@@ -48,10 +48,23 @@ const MEAL_TYPES = [
   { id:"drink",     label:"Drink",     emoji:"🥤" },
 ];
 const GOALS = [
-  { id:"cut",      label:"Cut",      emoji:"✂️", desc:"Lose fat (~400 kcal deficit)",    col:"#ff6b35" },
-  { id:"maintain", label:"Maintain", emoji:"⚖️", desc:"Recomp, near TDEE",               col:"#c4f135" },
-  { id:"bulk",     label:"Bulk",     emoji:"💪", desc:"Lean muscle (~300 kcal surplus)",  col:"#5aacff" },
+  { id:"cut",      label:"Cut",      emoji:"✂️", col:"#ff6b35",
+    submodes:[
+      {id:"cut_mild",   label:"Mild Cut",       desc:"−250 kcal/day · slow, muscle-preserving", deficit:-250},
+      {id:"cut",        label:"Standard Cut",   desc:"−400 kcal/day · recommended", deficit:-400},
+      {id:"cut_aggr",   label:"Aggressive Cut", desc:"−600 kcal/day · faster, harder to sustain", deficit:-600},
+    ]
+  },
+  { id:"maintain", label:"Maintain", emoji:"⚖️", col:"#c4f135", submodes:null, desc:"Near TDEE · body recomp" },
+  { id:"bulk",     label:"Bulk",     emoji:"💪", col:"#5aacff",
+    submodes:[
+      {id:"bulk_lean",  label:"Lean Bulk",  desc:"+200 kcal/day · minimal fat gain", surplus:200},
+      {id:"bulk",       label:"Standard",   desc:"+300 kcal/day · steady muscle gain", surplus:300},
+      {id:"bulk_aggr",  label:"Aggressive", desc:"+500 kcal/day · faster gains, more fat", surplus:500},
+    ]
+  },
 ];
+const GOAL_DEFICIT = {cut_mild:-250, cut:-400, cut_aggr:-600, maintain:0, bulk_lean:200, bulk:300, bulk_aggr:500};
 const ACT_LEVELS = [
   { id:"sedentary", label:"Sedentary",         desc:"Desk job, mostly sitting",      m:1.2  },
   { id:"light",     label:"Lightly active",    desc:"Some walking, ~5-8k steps",     m:1.35 },
@@ -115,7 +128,7 @@ function getDT(profile,dayType,weight,extraBurn=0,hasLoggedActivity=false){
   // If user logged an actual activity, use that burn instead of the day-type estimate
   const estimatedBurn=hasLoggedActivity?0:(DAY_BURN[dayType]||0);
   const base=tdee+estimatedBurn+extraBurn;
-  const adj={cut:-400,bulk:300,maintain:0}[profile.goal||"cut"];
+  const adj=GOAL_DEFICIT[profile.goalSubmode||profile.goal||"cut"]??GOAL_DEFICIT[profile.goal||"cut"]??-400;
   const kcal=Math.max(1200,Math.round(base+adj));
   const pPerKg={cut:2.2,bulk:1.8,maintain:2.0}[profile.goal||"cut"];
   const protein=Math.max(130,Math.round((weight||70)*pPerKg));
@@ -244,7 +257,7 @@ async function aFood(imgs, ps, mt, desc, apiKey) {
       + "5. Identify EVERY ingredient across ALL " + compressed.length + " photos. Skip none.\n"
       + "6. Unknown product: if label visible in photo, read it and populate newProduct with brand name and per-100g macros.\n\n"
       + "Reply ONLY with this JSON:\n"
-      + '{"type":"meal","name":"","kcal":0,"protein":0,"carbs":0,"fat":0,"notes":"","newProduct":{"name":"","kcal":0,"p":0,"c":0,"f":0},"ingredients":[{"name":"","weightG":0}]}';
+      + '{"type":"meal","name":"","kcal":0,"protein":0,"carbs":0,"fat":0,"totalGrams":0,"notes":"","newProduct":{"name":"","kcal":0,"p":0,"c":0,"f":0},"ingredients":[{"name":"","weightG":0}]}';
   }
   return callAI([{ type:"text", text:prompt }, ...iBlks(compressed)], apiKey, VISION_MODEL);
 }
@@ -550,14 +563,25 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose}) {
 }
 
 function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
-  const [mode,setMode]=useState("photos");const [mt,setMt]=useState("home");const [desc,setDesc]=useState("");const [imgs,setImgs]=useState([]);const [result,setResult]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState(null);const [form,setForm]=useState({name:"",kcal:"",protein:"",carbs:"",fat:"",notes:""});const [mealType,setMealType]=useState("breakfast");
+  const [mode,setMode]=useState("photos");const [mt,setMt]=useState("home");const [desc,setDesc]=useState("");const [imgs,setImgs]=useState([]);const [result,setResult]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState(null);const [form,setForm]=useState({name:"",kcal:"",protein:"",carbs:"",fat:"",notes:""});const [mealType,setMealType]=useState("breakfast");const [gramsEaten,setGramsEaten]=useState("");const [per100,setPer100]=useState(null);const [aiNotes,setAiNotes]=useState("");
   const activePreps=mealPreps.filter(p=>p.remaining>0);
   const [ingredients,setIngredients]=useState(null); // detected ingredients for confirmation
   const analyze=async()=>{setLoading(true);setErr(null);try{
     const res=await aFood(imgs,products,mt,desc,apiKey);
     setResult(res);
     if(res.type!=="activity"){
-      setForm({name:res.name||"",kcal:String(Math.round(res.kcal)||""),protein:String(Math.round(res.protein)||""),carbs:String(Math.round(res.carbs)||""),fat:String(Math.round(res.fat)||""),notes:res.notes||""});
+      const resKcal=Math.round(res.kcal)||0,resProt=Math.round(res.protein)||0,resCarbs=Math.round(res.carbs)||0,resFat=Math.round(res.fat)||0;
+      // Store per-100g values for gram-based recalc
+      if(res.totalGrams||res.estimatedGrams){
+        const tg=res.totalGrams||res.estimatedGrams;
+        setPer100({kcal:Math.round(resKcal/tg*100),p:Math.round(resProt/tg*100*10)/10,c:Math.round(resCarbs/tg*100*10)/10,f:Math.round(resFat/tg*100*10)/10,grams:tg});
+        setGramsEaten(String(tg));
+      } else {
+        // Estimate total grams from ingredients if available
+        const ingTotal=res.ingredients?.reduce((s,i)=>s+(parseFloat(i.weightG)||0),0)||0;
+        if(ingTotal>0){setPer100({kcal:Math.round(resKcal/ingTotal*100),p:Math.round(resProt/ingTotal*100*10)/10,c:Math.round(resCarbs/ingTotal*100*10)/10,f:Math.round(resFat/ingTotal*100*10)/10,grams:ingTotal});setGramsEaten(String(Math.round(ingTotal)));}
+      }
+      setForm({name:res.name||"",kcal:String(resKcal),protein:String(resProt),carbs:String(resCarbs),fat:String(resFat),notes:res.notes||""});setAiNotes(res.notes||"");
       // If AI returned ingredient breakdown, show confirmation step
       if(res.ingredients&&res.ingredients.length>0){
         setIngredients(res.ingredients.map(ing=>({...ing,weightG:String(ing.weightG||0)})));
@@ -600,7 +624,6 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
     }));
     setIngredients(null);
   };
-  const [aiNotes,setAiNotes]=useState(null);
   const confirm=()=>{if(result?.type==="activity"){onAdd({type:"activity_from_meal",burnedKcal:result.burnedKcal});return;}const{newProduct,...meal}={id:Date.now(),mealType,name:form.name||"Meal",kcal:parseFloat(form.kcal)||0,protein:parseFloat(form.protein)||0,carbs:parseFloat(form.carbs)||0,fat:parseFloat(form.fat)||0,notes:form.notes,time:new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}),newProduct:result?.newProduct||null};onAdd({...meal,newProduct});};
   const usePrep=prep=>{const n=prep.portions-prep.remaining+1;onAdd({id:Date.now(),name:prep.name,kcal:prep.perKcal,protein:prep.perProtein,carbs:prep.perCarbs,fat:prep.perFat,notes:`Prep ${n}/${prep.portions}`,time:new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})});setMealPreps(ps=>ps.map(p=>p.id===prep.id?{...p,remaining:p.remaining-1}:p));};
   const canAnalyze=!loading&&imgs.length>0&&(mt==="canteen"?desc.trim().length>5:true);
@@ -652,7 +675,26 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
                 <button onClick={recalcFromIngredients} style={{flex:2,padding:"11px 0",borderRadius:10,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:15}}>Confirm Weights →</button>
               </div>
             </div>)
-          :(<>{aiNotes&&<div style={{background:"#0a1220",border:`1px solid ${C.blue}40`,borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:12,color:C.blue,lineHeight:1.5}}>💡 {aiNotes}</div>}<MacroFields form={form} setForm={setForm}/></>)
+          :(<>
+            {/* Gram correction field */}
+            <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px",marginBottom:10}}>
+              <div style={{fontSize:11,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Grams / Amount eaten</div>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <input type="number" value={gramsEaten} onChange={e=>{
+                  setGramsEaten(e.target.value);
+                  if(per100&&parseFloat(e.target.value)>0){
+                    const g=parseFloat(e.target.value);const scale=g/100;
+                    setForm(f=>({...f,kcal:String(Math.round(per100.kcal*scale)),protein:String(Math.round(per100.p*scale*10)/10),carbs:String(Math.round(per100.c*scale*10)/10),fat:String(Math.round(per100.f*scale*10)/10)}));
+                  }
+                }} placeholder="e.g. 130" style={{width:90,background:C.bg,border:`1px solid ${C.lime}`,borderRadius:6,padding:"7px 10px",color:C.lime,fontSize:16,fontFamily:"monospace",fontWeight:700,outline:"none"}}/>
+                <span style={{fontSize:12,color:C.muted}}>g{per100?` · ${per100.kcal} kcal/100g`:""}</span>
+                {per100&&gramsEaten&&parseFloat(gramsEaten)!==per100.grams&&<span style={{fontSize:11,color:C.lime}}>↻ recalculated</span>}
+              </div>
+              <div style={{fontSize:10,color:C.muted,marginTop:4}}>Change grams if AI guessed wrong — macros recalculate automatically</div>
+            </div>
+            {aiNotes&&<div style={{background:"#0a1220",border:`1px solid ${C.blue}40`,borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:12,color:C.blue,lineHeight:1.5}}>💡 {aiNotes}</div>}
+            <MacroFields form={form} setForm={setForm}/>
+          </>)
       }
       {!ingredients&&result?.notes&&result.notes.length>3&&<div style={{background:"#0d1a0d",border:"1px solid #1a3a1a",borderRadius:8,padding:"9px 12px",marginTop:8,marginBottom:4}}><div style={{fontSize:10,color:C.lime,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:3}}>AI Notes</div><div style={{fontSize:12,color:"#a0d0a0",lineHeight:1.5}}>{result.notes}</div></div>}
       {!ingredients&&<div style={{display:"flex",gap:8,marginTop:12}}>
@@ -800,6 +842,14 @@ function ActivityTab({dayData,setDayData,profile,weights,setWeights}){
   const latestW=weights[0];const trend2=weights.length>=2?weights[0].weight-weights[1].weight:null;
   const logWeight=()=>{const w=parseFloat(wInput);if(!w)return;const e={date:TODAY(),weight:w};setWeights(p=>[e,...p.filter(x=>x.date!==e.date)].sort((a,b)=>b.date.localeCompare(a.date)));setWInput("");};
   const saveEditW=i=>{const w=parseFloat(editWVal);if(!w)return;setWeights(p=>{const n=[...p];n[i]={...n[i],weight:w};return n.sort((a,b)=>b.date.localeCompare(a.date));});setEditWIdx(null);};
+  // Weight chart data
+  const wSpark=[...weights].reverse().slice(-20);
+  const wVals=wSpark.map(w=>w.weight);
+  const wMin=wVals.length?Math.min(...wVals)-0.5:65;const wMax=wVals.length?Math.max(...wVals)+0.5:70;
+  const WW=310,WH=80;
+  const wpx=i=>wSpark.length>1?(i/(wSpark.length-1))*WW:WW/2;
+  const wpy=v=>WH-((v-wMin)/(wMax-wMin))*(WH-12)-6;
+  const wTrend=weeklyTrend(weights);
   return(<div style={{height:"100%",position:"relative"}}>
     <div style={{height:"100%",overflowY:"auto",padding:"0 16px 90px"}}>
       <div style={{padding:"18px 0 8px"}}><div style={{fontSize:26,fontWeight:800,color:C.text,letterSpacing:"-0.03em"}}>Activity</div></div>
@@ -809,6 +859,14 @@ function ActivityTab({dayData,setDayData,profile,weights,setWeights}){
           <span style={{fontSize:11,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}>Weight Log</span>
           {latestW&&<div style={{display:"flex",alignItems:"baseline",gap:6}}><span style={{fontFamily:"monospace",fontSize:18,fontWeight:800,color:C.lime}}>{latestW.weight.toFixed(2)}</span><span style={{fontSize:12,color:C.muted}}>kg</span>{trend2!==null&&<span style={{fontFamily:"monospace",fontSize:12,color:trend2<0?C.lime:C.red}}>{trend2<0?"↓":"↑"}{Math.abs(trend2).toFixed(2)}</span>}</div>}
         </div>
+        {wSpark.length>=4&&(<svg width={WW} height={WH} style={{display:"block",marginBottom:6,overflow:"visible"}}>
+          {/* Trend line */}
+          {wTrend!==null&&wSpark.length>=4&&(()=>{const startV=wSpark[0].weight;const endV=wSpark[wSpark.length-1].weight+(wTrend/7*(wSpark.length-1));return<line x1={0} y1={wpy(startV)} x2={WW} y2={wpy(Math.min(wMax-0.1,Math.max(wMin+0.1,endV)))} stroke={wTrend<0?C.lime+"60":C.red+"60"} strokeWidth={1} strokeDasharray="3 3"/>;})()}
+          <polyline points={wSpark.map((d,i)=>wpx(i)+","+wpy(d.weight)).join(" ")} fill="none" stroke={C.lime+"50"} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"/>
+          <polyline points={wSpark.map((d,i)=>wpx(i)+","+wpy(d.weight)).join(" ")} fill="none" stroke={C.lime} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
+          {wSpark.map((d,i)=>{const isFirst=i===0;const isLast=i===wSpark.length-1;const showLabel=isFirst||isLast||i%Math.ceil(wSpark.length/4)===0;return(<g key={i}><circle cx={wpx(i)} cy={wpy(d.weight)} r={isLast?4:2.5} fill={isLast?C.lime:C.lime+"80"}/>{showLabel&&<text x={wpx(i)} y={wpy(d.weight)-7} textAnchor={i===0?"start":i===wSpark.length-1?"end":"middle"} fontSize={8} fill={C.muted} fontFamily="monospace">{d.weight.toFixed(1)}</text>}</g>);})}
+        </svg>)}
+        {wSpark.length<4&&wSpark.length>0&&<div style={{fontSize:11,color:C.muted,marginBottom:6,fontFamily:"monospace"}}>Log {4-wSpark.length} more weight{4-wSpark.length!==1?"s":""} to see trend graph</div>}
         <div style={{display:"flex",gap:8,marginBottom:8}}>
           <input type="number" step="0.05" placeholder="Log weight (kg)" value={wInput} onChange={e=>setWInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&logWeight()} style={{flex:1,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"7px 10px",color:C.text,fontSize:14,fontFamily:"monospace",outline:"none"}}/>
           <button onClick={logWeight} style={{padding:"7px 14px",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>Log</button>
@@ -865,7 +923,10 @@ function AnalysisTab({weights,profile,setProfile,progressPhotos,setProgressPhoto
   const latestWeight=weights[0]?.weight;const trend=weeklyTrend(weights);const gc=gCol(profile.goal);
   const spark=[...weights].reverse().slice(-20);const W=300,H=60;const vals=spark.map(w=>w.weight);const hasT=profile.targetWeightKg&&spark.length>1;const sMin=vals.length?Math.min(...vals,(hasT?profile.targetWeightKg:Infinity))-0.5:65;const sMax=vals.length?Math.max(...vals)+0.5:70;const px=i=>spark.length>1?(i/(spark.length-1))*W:W/2;const py=v=>H-((v-sMin)/(sMax-sMin))*(H-8)-4;
   const startW=weights[weights.length-1]?.weight||latestWeight;const totalLost=startW&&latestWeight?startW-latestWeight:null;const kgToGoal=profile.targetWeightKg&&latestWeight?latestWeight-profile.targetWeightKg:null;const weeksETA=trend&&kgToGoal&&Math.sign(kgToGoal)===Math.sign(trend)?Math.abs(kgToGoal/trend):null;const goalDate=weeksETA?new Date(Date.now()+weeksETA*7*24*3600*1000):null;const tdee=latestWeight?getTDEE(profile,latestWeight):null;
-  const analyze=async()=>{if(!imgs.length)return;setAnalyzing(true);setErr(null);try{const res=await aAnalysis(imgs,profile,latestWeight,trend,profile.apiKey);setResult(res);const entry={id:Date.now(),date:TODAY(),preview:imgs[0].preview,analysis:res};setProgressPhotos(p=>[entry,...p].slice(0,50));setImgs([]);}catch(e){setErr(String(e.message||e));}setAnalyzing(false);};
+  const analyze=async()=>{if(!imgs.length)return;setAnalyzing(true);setErr(null);try{const res=await aAnalysis(imgs,profile,latestWeight,trend,profile.apiKey);setResult(res);// Store without heavy base64 preview to avoid storage limits; keep thumbnail
+const thumb=imgs[0].preview.length>50000?imgs[0].preview.substring(0,50000)+"":imgs[0].preview;
+const entry={id:Date.now(),date:TODAY(),preview:thumb,analysis:res};
+setProgressPhotos(p=>[entry,...p].slice(0,50));setImgs([]);}catch(e){setErr(String(e.message||e));}setAnalyzing(false);};
   return(<div style={{height:"100%",overflowY:"auto",padding:"0 16px 20px"}}>
     <div style={{padding:"18px 0 12px"}}><div style={{fontSize:26,fontWeight:800,color:C.text,letterSpacing:"-0.03em"}}>Analysis</div></div>
     {latestWeight&&<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"14px 16px",marginBottom:12}}>
@@ -1041,7 +1102,7 @@ function SettingsTab({profile,setProfile,weights,setWeights}){
     <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"14px 16px",marginBottom:12}}>
       <div style={{fontSize:14,fontWeight:600,color:C.text,marginBottom:10}}>Goal Mode</div>
       {(!profile.birthday||!profile.heightCm)?<div style={{fontSize:13,color:C.muted}}>Complete Personal Info to enable personalized targets.</div>:(<>
-        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:12}}>{GOALS.map(({id,label,emoji,desc,col})=>{const active=profile.goal===id;return(<button key={id} onClick={()=>setProfile(p=>({...p,goal:id}))} style={{padding:"12px 14px",borderRadius:10,border:`1px solid ${active?col:C.border}`,background:active?col+"15":C.bg,cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:14,fontWeight:active?700:500,color:active?col:C.text}}>{emoji} {label}</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{desc}</div></div>{active&&<span style={{color:col,fontSize:18}}>✓</span>}</button>);})}</div>
+        <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>{GOALS.map(g=>{const active=profile.goal===g.id;const col=g.col;return(<div key={g.id}><button onClick={()=>setProfile(p=>({...p,goal:g.id,goalSubmode:g.submodes?g.submodes[1]?.id||g.id:g.id}))} style={{width:"100%",padding:"12px 14px",borderRadius:10,border:`1px solid ${active?col:C.border}`,background:active?col+"15":C.bg,cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:14,fontWeight:active?700:500,color:active?col:C.text}}>{g.emoji} {g.label}</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{g.desc||g.submodes?.[1]?.desc}</div></div>{active&&<span style={{color:col,fontSize:18}}>✓</span>}</button>{active&&g.submodes&&(<div style={{display:"flex",flexDirection:"column",gap:4,marginTop:4,marginLeft:10}}>{g.submodes.map(sub=>(<button key={sub.id} onClick={()=>setProfile(p=>({...p,goalSubmode:sub.id}))} style={{padding:"8px 12px",borderRadius:8,border:`1px solid ${profile.goalSubmode===sub.id?col:C.border}`,background:profile.goalSubmode===sub.id?col+"22":C.bg,cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:12,fontWeight:profile.goalSubmode===sub.id?700:400,color:profile.goalSubmode===sub.id?col:C.muted}}>{sub.label}</div><div style={{fontSize:10,color:C.muted}}>{sub.desc}</div></div>{profile.goalSubmode===sub.id&&<span style={{color:col,fontSize:13}}>✓</span>}</button>))}</div>)}</div>);})}</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}><Field label="Target weight kg" value={String(profile.targetWeightKg||"")} onChange={v=>setProfile(p=>({...p,targetWeightKg:parseFloat(v)||null}))} type="number" placeholder="65"/><Field label="Goal note" value={profile.goalNote||""} onChange={v=>setProfile(p=>({...p,goalNote:v}))} placeholder="e.g. Visible abs for summer"/></div>
       </>)}
     </div>
