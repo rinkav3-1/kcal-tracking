@@ -263,10 +263,13 @@ async function aFood(imgs, ps, mt, desc, apiKey) {
       + "2. SCALE VISIBLE: the scale number is ABSOLUTE TRUTH. Always use it. Never override it with a packaging weight or an estimate. The scale is zeroed per ingredient.\n"
       + "3. NO SCALE but whole packaged product shown (bar, jar, sachet): use the FULL PACKAGE WEIGHT printed on packaging (e.g. 55g bar = 55g). Read it from the package.\n"
       + "4. Egg shell visible = eggs already cracked in, scale shows their weight.\n"
-      + "5. Identify EVERY ingredient across ALL " + compressed.length + " photos. Skip none.\n"
-      + "6. Unknown product: if label visible in photo, read it and populate newProduct with brand name and per-100g macros.\n\n"
+      + "5. Identify EVERY ingredient across ALL " + compressed.length + " photos. Skip none — small items like syrups, oils, sweeteners count.\n"
+      + "6. Per ingredient: kcal/protein/carbs/fat MUST be PER-100g reference values for that ingredient (NOT scaled to weight). If matched to a known product, copy its per-100g values exactly. If not matched, give standard reference per-100g values for that food.\n"
+      + "7. weightG = the actual scale/package gram weight.\n"
+      + "8. Top-level kcal/protein/carbs/fat = meal totals (already scaled). totalGrams = sum of weightG.\n"
+      + "9. Unknown product: if label visible in photo, read it and populate newProduct with brand name and per-100g macros.\n\n"
       + "Reply ONLY with this JSON:\n"
-      + '{"type":"meal","name":"","kcal":0,"protein":0,"carbs":0,"fat":0,"totalGrams":0,"notes":"","newProduct":{"name":"","kcal":0,"p":0,"c":0,"f":0},"ingredients":[{"name":"","weightG":0}]}';
+      + '{"type":"meal","name":"","kcal":0,"protein":0,"carbs":0,"fat":0,"totalGrams":0,"notes":"","newProduct":{"name":"","kcal":0,"p":0,"c":0,"f":0},"ingredients":[{"name":"","weightG":0,"kcal":0,"protein":0,"carbs":0,"fat":0}]}';
   }
   return callAI([{ type:"text", text:prompt }, ...iBlks(compressed)], apiKey, VISION_MODEL, 2500);
 }
@@ -290,14 +293,25 @@ async function aPrep(imgs, ps, desc, apiKey) {
       + "Known products per 100g: " + pCtx(ps) + "\n\n"
       + "RULES:\n"
       + "1. Pair package photos with their corresponding scale photo when possible — this gives you BOTH the product identity AND the weight.\n"
-      + "2. Use the known products list to look up per-100g macros. If the product matches one in the list, use those exact macros.\n"
-      + "3. If you can't identify a product but see a scale reading, still include the ingredient with a generic name and best-guess macros.\n"
-      + "4. Skip context-only photos (mixing bowls, finished containers without scale).\n"
-      + "5. Sum everything for totals.\n\n"
+      + "2. List EVERY ingredient that appears on a scale across ALL " + c.length + " photos. Count them carefully — small additions like syrups, oils, sweeteners, nuts, seeds, sauces still count. Do not skip any.\n"
+      + "3. The kcal/protein/carbs/fat fields you return MUST be PER-100g reference values for that ingredient (NOT per-serving, NOT scaled to the weight). If you matched a known product, copy its per-100g values exactly.\n"
+      + "4. The weightG field is the gram weight from the scale (or your best estimate if no scale shown).\n"
+      + "5. totalKcal/totalProtein/totalCarbs/totalFat at the top level ARE the meal totals (already scaled): sum of (per-100g × weightG / 100) across all ingredients.\n"
+      + "6. estimatedWeightG = sum of all ingredient weightG.\n\n"
       + "Reply ONLY with JSON, no explanation:\n"
       + '{"totalKcal":0,"totalProtein":0,"totalCarbs":0,"totalFat":0,"estimatedWeightG":0,"notes":"","ingredients":[{"name":"","weightG":0,"kcal":0,"protein":0,"carbs":0,"fat":0}]}' },
     ...iBlks(c),
   ], apiKey, VISION_MODEL, 2500);
+}
+
+// Per-ingredient AI estimate: cheap text-only call returning per-100g macros
+async function aEstimateIngredient(name, apiKey) {
+  return callAI([
+    { type:"text", text:"Estimate per-100g macros for this generic food ingredient: \"" + name + "\".\n"
+      + "Use standard reference values (USDA-style) for the most likely interpretation.\n"
+      + "Reply ONLY with JSON, no explanation:\n"
+      + '{"kcal":0,"p":0,"c":0,"f":0}' }
+  ], apiKey, TEXT_MODEL, 200);
 }
 
 async function aLabel(imgs, apiKey) {
@@ -424,130 +438,243 @@ function EditPrepSheet({prep,onSave,onClose}){
 // ── AddIngredientRow — inline add with name + weight ──────────────────────────
 
 // ── IngredientConfirmPanel — shared between meal log and meal prep ─────────────
-function IngredientConfirmPanel({ingredients, setIngredients, products, onConfirm, onSkip, confirmLabel="Confirm Weights →"}) {
+// Stop words: modifiers/brands/adjectives that should NOT be used to match foods on their own.
+// Two ingredients sharing only stop words ("frozen blueberries" vs "frozen peas") must NOT match.
+const STOP_WORDS = new Set([
+  // Generic modifiers
+  "frozen","fresh","raw","cooked","natural","organic","light","skinless","sliced","whole","reduced",
+  "free","with","and","the","plain","style","mix","ice","cream","sour","mild","spicy","grilled","baked",
+  "lean","brand","new","of","for","large","small","medium","extra",
+  // Brand names from this user's product set
+  "lidl","pilos","kania","kikkoman","nixe","crownfield","insanefits","julian","bakery","barebells",
+  "propud","prowhey","hellmann","hellmanns","kedainiu","baresa","pikon","della","sante","freshona",
+  "rimi","malsena","fitspo","selected","vemondo","bio",
+]);
+// Strip parens, punctuation, accents — produce comparable tokens
+const normName = s => (s||"").toLowerCase()
+  .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  .replace(/[(),.!?:;\-+%]/g, " ")
+  .replace(/\s+/g, " ").trim();
+
+function IngredientConfirmPanel({ingredients, setIngredients, products, onConfirm, onSkip, confirmLabel="Confirm Weights →", apiKey}) {
   const [expandedIdx, setExpandedIdx] = useState(null);
   const [swapIdx, setSwapIdx] = useState(null);
   const [swapSearch, setSwapSearch] = useState("");
+  const [estimatingIdx, setEstimatingIdx] = useState(null);
+  const [rowErr, setRowErr] = useState({});
 
-  // Best-match product lookup — score by word overlap, require score >= 3 or exact match
+  // Match ingredient name to a product label using SPECIFIC food words, not modifiers.
+  // Rules:
+  //   1. Exact normalized match wins.
+  //   2. If both names contain "specific" words (non-stop), at least one must overlap.
+  //   3. Specific word overlaps score 4× more than stop-word overlaps.
+  //   4. Final score must clear a meaningful threshold.
   const bestMatch = (ingName) => {
     if (!products?.length) return null;
-    const nl = ingName.toLowerCase();
-    // If ingredient has a pinned product (_product field), use that
+    const nl = normName(ingName);
+    if (!nl) return null;
+    // Pass 1: exact normalized match
+    for (const p of products) {
+      if (normName(p.name) === nl) return p;
+    }
+    const tokens = s => s.split(" ").filter(w => w.length > 2);
+    const ingToks = tokens(nl);
+    const ingSpecific = ingToks.filter(w => !STOP_WORDS.has(w));
     let best = null, bestScore = 0;
     for (const p of products) {
-      const pl = p.name.toLowerCase();
-      if (pl === nl) return p; // exact match wins immediately
-      const iw = nl.split(/\s+/).filter(w => w.length > 2);
-      const pw = pl.split(/\s+/).filter(w => w.length > 2);
-      // Weighted score: longer/more-specific word matches score higher
+      const pl = normName(p.name);
+      const prodToks = tokens(pl);
+      const prodSpecific = prodToks.filter(w => !STOP_WORDS.has(w));
+      // Critical guard: if both names have specific words, at least one must match.
+      // This blocks "frozen blueberries" → "frozen peas" via the shared modifier "frozen".
+      if (ingSpecific.length > 0 && prodSpecific.length > 0) {
+        const anySpecificOverlap = ingSpecific.some(w =>
+          prodSpecific.some(pw => pw === w || (w.length >= 5 && pw.includes(w)) || (pw.length >= 5 && w.includes(pw)))
+        );
+        if (!anySpecificOverlap) continue;
+      }
       let score = 0;
-      for (const w of iw) { if (pl.includes(w)) score += w.length; }
-      for (const w of pw) { if (nl.includes(w)) score += w.length; }
-      // Bonus: both names start with same word
-      if (iw[0] && pw[0] && iw[0] === pw[0]) score += 5;
+      for (const w of ingSpecific) {
+        for (const pw of prodSpecific) {
+          if (pw === w) score += w.length * 4;
+          else if (w.length >= 5 && pw.includes(w)) score += w.length * 2;
+          else if (pw.length >= 5 && w.includes(pw)) score += pw.length * 2;
+        }
+      }
+      // Stop-word overlap = small bonus only
+      for (const w of ingToks) {
+        if (STOP_WORDS.has(w) && prodToks.includes(w)) score += 1;
+      }
       if (score > bestScore) { bestScore = score; best = p; }
     }
-    // Only accept match if score is meaningful (at least one 4-char word matched both ways)
-    return bestScore >= 8 ? best : null;
+    return bestScore >= 12 ? best : null;
   };
 
   const macrosFor = (ing) => {
     const g = parseFloat(ing.weightG) || 0;
-    // Canteen ingredients: NEVER auto-match to product labels (we don't know the kitchen's brands).
-    // Pinned ingredients: user already explicitly chose a swap, use stored per-100g values.
-    // Otherwise: try fuzzy product match.
+    // Canteen: never auto-match. Pinned: user-chosen. Otherwise: try fuzzy match.
     const prod = (ing._canteen || ing._pinned) ? null : bestMatch(ing.name);
-    const src = prod || (ing._pinned ? ing : null);
-    if (src) {
-      const kcal100 = src.kcal ?? ing._kcal100 ?? 0;
-      const p100 = src.p ?? ing._p100 ?? 0;
-      const c100 = src.c ?? ing._c100 ?? 0;
-      const f100 = src.f ?? ing._f100 ?? 0;
-      return { kcal: Math.round(kcal100 * g / 100), protein: Math.round(p100 * g / 100 * 10) / 10, carbs: Math.round(c100 * g / 100 * 10) / 10, fat: Math.round(f100 * g / 100 * 10) / 10, matched: src.name || ing.name };
+    let kcal100, p100, c100, f100, matched, source;
+    if (prod) {
+      kcal100 = prod.kcal; p100 = prod.p; c100 = prod.c; f100 = prod.f;
+      matched = prod.name; source = "label";
+    } else if (ing._pinned) {
+      kcal100 = ing._kcal100 ?? 0; p100 = ing._p100 ?? 0; c100 = ing._c100 ?? 0; f100 = ing._f100 ?? 0;
+      matched = ing.name; source = ing._estimated ? "ai" : "label";
+    } else {
+      // Fall back to AI-supplied per-100g (now requested in prompts)
+      kcal100 = ing.kcal || 0; p100 = ing.protein || 0; c100 = ing.carbs || 0; f100 = ing.fat || 0;
+      matched = null;
+      source = (kcal100 || p100 || c100 || f100) ? "ai-prompt" : "none";
     }
-    // Fallback: AI-provided per-100g estimates
-    return { kcal: Math.round((ing.kcal || 0) * g / 100), protein: Math.round((ing.protein || 0) * g / 100 * 10) / 10, carbs: Math.round((ing.carbs || 0) * g / 100 * 10) / 10, fat: Math.round((ing.fat || 0) * g / 100 * 10) / 10, matched: null };
+    return {
+      kcal: Math.round(kcal100 * g / 100),
+      protein: Math.round(p100 * g / 100 * 10) / 10,
+      carbs: Math.round(c100 * g / 100 * 10) / 10,
+      fat: Math.round(f100 * g / 100 * 10) / 10,
+      kcal100, p100, c100, f100,
+      matched, source,
+    };
   };
 
-  // onPointerDown + preventDefault fixes iOS Safari click-cancellation in scrollable sheets
-  const swapWith = (e, idx, prod) => {
-    e.preventDefault(); e.stopPropagation();
+  // Reliable click handler — onClick (no preventDefault) avoids iOS click-cancellation issues
+  // that affected the previous onPointerDown approach.
+  const swapWith = (idx, prod) => {
     setIngredients(p => p.map((ing, i) => i !== idx ? ing : {
-      ...ing, name: prod.name,
-      _pinned: true, _kcal100: prod.kcal, _p100: prod.p, _c100: prod.c, _f100: prod.f,
-      kcal: prod.kcal, protein: prod.p, carbs: prod.c, fat: prod.f
+      ...ing,
+      name: prod.name,
+      _pinned: true, _estimated: false,
+      _kcal100: prod.kcal, _p100: prod.p, _c100: prod.c, _f100: prod.f,
+      kcal: prod.kcal, protein: prod.p, carbs: prod.c, fat: prod.f,
     }));
     setSwapIdx(null); setSwapSearch("");
   };
 
+  const estimateForRow = async (idx) => {
+    const ing = ingredients[idx];
+    if (!ing?.name) return;
+    setEstimatingIdx(idx);
+    setRowErr(prev => ({...prev, [idx]: null}));
+    try {
+      const res = await aEstimateIngredient(ing.name, apiKey);
+      setIngredients(p => p.map((x, j) => j !== idx ? x : {
+        ...x,
+        _pinned: true, _estimated: true,
+        _kcal100: res.kcal||0, _p100: res.p||0, _c100: res.c||0, _f100: res.f||0,
+        kcal: res.kcal||0, protein: res.p||0, carbs: res.c||0, fat: res.f||0,
+      }));
+    } catch (e) {
+      setRowErr(prev => ({...prev, [idx]: String(e.message||e).slice(0,80)}));
+    }
+    setEstimatingIdx(null);
+  };
+
+  const editPer100 = (idx, key, val) => {
+    setIngredients(p => p.map((x, j) => j !== idx ? x : {
+      ...x, _pinned: true, _estimated: x._estimated || !x._pinned,
+      [`_${key}100`]: parseFloat(val) || 0,
+      [key === "kcal" ? "kcal" : key === "p" ? "protein" : key === "c" ? "carbs" : "fat"]: parseFloat(val) || 0,
+    }));
+  };
+
   const filteredProds = swapSearch.length > 0
-    ? (products || []).filter(p => p.name.toLowerCase().includes(swapSearch.toLowerCase())).slice(0, 8)
-    : (products || []).slice(0, 8);
+    ? (products || []).filter(p => p.name.toLowerCase().includes(swapSearch.toLowerCase())).slice(0, 12)
+    : (products || []).slice(0, 12);
 
   const totals = ingredients.reduce((acc, ing) => {
     const m = macrosFor(ing);
     return { kcal: acc.kcal + m.kcal, protein: acc.protein + m.protein, carbs: acc.carbs + m.carbs, fat: acc.fat + m.fat };
   }, { kcal: 0, protein: 0, carbs: 0, fat: 0 });
 
+  // Status pill + colour for each row
+  const statusFor = (ing, m) => {
+    if (ing._canteen) return { color: C.yellow, bg: C.yellow+"15", label: "🍴 canteen estimate", border: C.yellow+"40" };
+    if (ing._pinned && ing._estimated) return { color: C.blue, bg: C.blue+"15", label: "🤖 AI-estimated", border: C.blue+"50" };
+    if (ing._pinned) return { color: C.lime, bg: C.lime+"18", label: "✓ label pinned: "+ing.name, border: C.lime };
+    if (m.matched) return { color: C.lime, bg: C.lime+"12", label: "✓ matched label: "+m.matched, border: C.lime+"50" };
+    return { color: C.yellow, bg: C.yellow+"10", label: "⚠ no label match — macros unknown", border: C.yellow+"40" };
+  };
+
   return (
     <div>
       <div style={{fontSize:12,fontWeight:600,color:C.text,marginBottom:3}}>Confirm Ingredients</div>
-      <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Check weights · ⇄ swap product · ▸ see macros</div>
+      <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Tap row for details · ⇄ swap · 🤖 estimate when no label</div>
       <div style={{display:"flex",flexDirection:"column",gap:7,marginBottom:10}}>
         {ingredients.map((ing, i) => {
           const m = macrosFor(ing);
           const isExpanded = expandedIdx === i;
           const isSwapping = swapIdx === i;
-          const borderColor = ing._pinned ? C.lime : ing._canteen ? C.yellow+"40" : m.matched ? C.lime+"40" : C.border;
+          const isEstimating = estimatingIdx === i;
+          const st = statusFor(ing, m);
+          const noMacros = m.kcal100 === 0 && m.p100 === 0 && m.c100 === 0 && m.f100 === 0;
           return (
-            <div key={i} style={{background:C.bg,borderRadius:10,border:`1px solid ${borderColor}`}}>
+            <div key={i} style={{background:C.bg,borderRadius:10,border:`1px solid ${st.border}`,overflow:"hidden"}}>
               {/* Main row */}
               <div style={{display:"flex",alignItems:"center",gap:6,padding:"9px 10px"}}>
                 <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:12,color:ing._pinned?C.lime:m.matched?C.lime:C.text,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ing.name}</div>
-                  {ing._canteen && <div style={{fontSize:9,color:C.yellow,marginTop:1}}>🍴 canteen estimate — tap ⇄ to override</div>}
-                  {!ing._canteen && m.matched && m.matched !== ing.name && <div style={{fontSize:9,color:C.muted,marginTop:1}}>→ {m.matched}</div>}
-                  {!ing._canteen && !m.matched && !ing._pinned && <div style={{fontSize:9,color:C.yellow}}>⚠ no label match — AI estimate</div>}
+                  <div style={{fontSize:12,color:st.color,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ing.name}</div>
+                  <div style={{fontSize:9,color:st.color,marginTop:1,opacity:0.85}}>{st.label}</div>
                 </div>
                 <input type="number" value={ing.weightG} onChange={e => setIngredients(p => p.map((x, j) => j !== i ? x : {...x, weightG: e.target.value}))}
                   style={{width:58,background:C.card,border:`1px solid ${C.lime}`,borderRadius:6,padding:"5px 6px",color:C.lime,fontSize:14,fontFamily:"monospace",fontWeight:700,outline:"none",textAlign:"right"}}/>
                 <span style={{fontSize:11,color:C.muted}}>g</span>
-                <button onPointerDown={e=>{e.preventDefault();setSwapIdx(isSwapping?null:i);setSwapSearch("");setExpandedIdx(null);}}
+                <button onClick={()=>{setSwapIdx(isSwapping?null:i);setSwapSearch("");setExpandedIdx(null);}}
                   style={{padding:"5px 8px",borderRadius:6,background:isSwapping?C.orange+"25":"none",border:`1px solid ${isSwapping?C.orange:C.border}`,color:isSwapping?C.orange:C.muted,fontSize:11,cursor:"pointer",flexShrink:0,lineHeight:1}}>⇄</button>
-                <button onPointerDown={e=>{e.preventDefault();setExpandedIdx(isExpanded?null:i);setSwapIdx(null);}}
-                  style={{padding:"5px 8px",borderRadius:6,background:isExpanded?C.blue+"25":"none",border:`1px solid ${isExpanded?C.blue:C.border}`,color:isExpanded?C.blue:C.muted,fontSize:11,cursor:"pointer",flexShrink:0,lineHeight:1}}>▸</button>
+                <button onClick={()=>{setExpandedIdx(isExpanded?null:i);setSwapIdx(null);}}
+                  style={{padding:"5px 8px",borderRadius:6,background:isExpanded?C.blue+"25":"none",border:`1px solid ${isExpanded?C.blue:C.border}`,color:isExpanded?C.blue:C.muted,fontSize:11,cursor:"pointer",flexShrink:0,lineHeight:1}}>{isExpanded?"▾":"▸"}</button>
               </div>
-              {/* Macro breakdown */}
+              {/* Quick actions when no match */}
+              {!isSwapping && !isExpanded && noMacros && !ing._canteen && (
+                <div style={{padding:"7px 10px 9px",borderTop:`1px solid ${C.border}`,display:"flex",gap:6,flexWrap:"wrap"}}>
+                  <button onClick={()=>estimateForRow(i)} disabled={isEstimating} style={{flex:1,padding:"7px 8px",borderRadius:6,background:isEstimating?C.faint:C.blue+"22",border:`1px solid ${C.blue}50`,color:C.blue,fontWeight:600,cursor:isEstimating?"default":"pointer",fontSize:11}}>{isEstimating?"🤖 estimating…":"🤖 AI estimate"}</button>
+                  <button onClick={()=>{setSwapIdx(i);setSwapSearch("");}} style={{flex:1,padding:"7px 8px",borderRadius:6,background:C.orange+"15",border:`1px solid ${C.orange}40`,color:C.orange,fontWeight:600,cursor:"pointer",fontSize:11}}>⇄ Pick label</button>
+                  <button onClick={()=>{setExpandedIdx(i);}} style={{flex:1,padding:"7px 8px",borderRadius:6,background:"none",border:`1px solid ${C.border}`,color:C.muted,fontWeight:500,cursor:"pointer",fontSize:11}}>✎ Manual</button>
+                </div>
+              )}
+              {rowErr[i] && <div style={{padding:"6px 10px",fontSize:11,color:"#ff8080"}}>⚠ {rowErr[i]}</div>}
+              {/* Expanded macro view + manual edit */}
               {isExpanded && (
-                <div style={{padding:"7px 12px 9px",display:"flex",gap:10,borderTop:`1px solid ${C.border}`,flexWrap:"wrap"}}>
-                  <span style={{fontFamily:"monospace",fontSize:11,color:C.lime}}>{m.kcal} kcal</span>
-                  <span style={{fontFamily:"monospace",fontSize:11,color:C.blue}}>{m.protein}g P</span>
-                  <span style={{fontFamily:"monospace",fontSize:11,color:C.orange}}>{m.carbs}g C</span>
-                  <span style={{fontFamily:"monospace",fontSize:11,color:C.purple}}>{m.fat}g F</span>
-                  <span style={{fontSize:10,color:C.muted,marginLeft:"auto"}}>{parseFloat(ing.weightG)||0}g eaten</span>
+                <div style={{padding:"9px 12px 11px",borderTop:`1px solid ${C.border}`}}>
+                  <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:8}}>
+                    <span style={{fontFamily:"monospace",fontSize:11,color:C.lime}}>{m.kcal} kcal</span>
+                    <span style={{fontFamily:"monospace",fontSize:11,color:C.blue}}>{m.protein}g P</span>
+                    <span style={{fontFamily:"monospace",fontSize:11,color:C.orange}}>{m.carbs}g C</span>
+                    <span style={{fontFamily:"monospace",fontSize:11,color:C.purple}}>{m.fat}g F</span>
+                    <span style={{fontSize:10,color:C.muted,marginLeft:"auto"}}>{parseFloat(ing.weightG)||0}g eaten</span>
+                  </div>
+                  <div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:5}}>per-100g (edit to override)</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:5}}>
+                    {[["kcal","kcal",C.lime],["p","P",C.blue],["c","C",C.orange],["f","F",C.purple]].map(([k,lbl,col])=>(
+                      <div key={k}>
+                        <div style={{fontSize:9,color:C.muted,fontFamily:"monospace",marginBottom:2}}>{lbl}/100g</div>
+                        <input type="number" value={k==="kcal"?m.kcal100:k==="p"?m.p100:k==="c"?m.c100:m.f100}
+                          onChange={e=>editPer100(i,k,e.target.value)}
+                          style={{width:"100%",boxSizing:"border-box",background:C.card,border:`1px solid ${C.border}`,borderRadius:5,padding:"5px 6px",color:col,fontSize:12,fontFamily:"monospace",outline:"none"}}/>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
               {/* Swap panel */}
               {isSwapping && (
                 <div style={{padding:"8px 10px 10px",borderTop:`1px solid ${C.border}`}}>
-                  <div style={{fontSize:10,color:C.orange,fontFamily:"monospace",textTransform:"uppercase",marginBottom:6}}>Swap with a product:</div>
+                  <div style={{fontSize:10,color:C.orange,fontFamily:"monospace",textTransform:"uppercase",marginBottom:6}}>Pick a label:</div>
                   <input value={swapSearch} onChange={e => setSwapSearch(e.target.value)} placeholder="Search your product labels…"
                     style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,outline:"none",marginBottom:7}}
                     autoFocus/>
-                  <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                  <div style={{display:"flex",flexDirection:"column",gap:5,maxHeight:240,overflowY:"auto"}}>
                     {filteredProds.map(prod => (
-                      <div key={prod.name} onPointerDown={e => swapWith(e, i, prod)}
-                        style={{padding:"9px 12px",borderRadius:8,background:C.card,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",userSelect:"none"}}>
+                      <button key={prod.name} type="button" onClick={() => swapWith(i, prod)}
+                        style={{padding:"9px 12px",borderRadius:8,background:C.card,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",userSelect:"none",textAlign:"left"}}>
                         <span style={{fontSize:13,color:C.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{prod.name}</span>
                         <span style={{fontFamily:"monospace",fontSize:11,color:C.muted,flexShrink:0,marginLeft:10}}>{prod.kcal}k {prod.p}P</span>
-                      </div>
+                      </button>
                     ))}
-                    {filteredProds.length === 0 && <div style={{fontSize:11,color:C.muted,padding:"4px 0"}}>No matches in your labels</div>}
+                    {filteredProds.length === 0 && <div style={{fontSize:11,color:C.muted,padding:"4px 0"}}>No labels match. Add it via Food tab → Product Labels, or use 🤖 AI estimate below.</div>}
                   </div>
-                  <div onPointerDown={e=>{e.preventDefault();setIngredients(p=>p.map((x,j)=>j!==i?x:{...x,name:swapSearch||x.name,_pinned:false,kcal:0,protein:0,carbs:0,fat:0}));setSwapIdx(null);setSwapSearch("");}}
-                    style={{marginTop:8,padding:"8px 10px",borderRadius:6,background:"none",border:`1px dashed ${C.border}`,color:C.muted,fontSize:11,cursor:"pointer",textAlign:"center",userSelect:"none"}}>
-                    Use "{swapSearch||ing.name}" as unknown (AI will estimate macros)
+                  <div style={{display:"flex",gap:6,marginTop:8}}>
+                    <button onClick={()=>{setSwapIdx(null);setSwapSearch("");estimateForRow(i);}} disabled={isEstimating} style={{flex:1,padding:"8px",borderRadius:6,background:C.blue+"22",border:`1px solid ${C.blue}50`,color:C.blue,fontWeight:600,cursor:"pointer",fontSize:11}}>🤖 Use AI estimate instead</button>
+                    <button onClick={()=>{setSwapIdx(null);setSwapSearch("");}} style={{padding:"8px 12px",borderRadius:6,background:"none",border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:11}}>Cancel</button>
                   </div>
                 </div>
               )}
@@ -617,8 +744,19 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose}) {
   const [selected,setSelected]=useState({}); // {prepId: gramsString}
   const [extras,setExtras]=useState({name:"",kcal:"",protein:"",carbs:"",fat:""});
   const [showExtras,setShowExtras]=useState(false);
+  const [logErr,setLogErr]=useState("");
+
+  // A prep is "broken" if it has no macros and no per-100 macros saved — usually means
+  // it was created before the macro fields were filled in. Let the user know rather
+  // than silently logging zeros.
+  const isPrepBroken = prep => {
+    const hasTotals = (prep.totalKcal||0) > 0 || (prep.totalProtein||0) > 0;
+    const hasPer100 = (prep.per100Kcal||0) > 0 || (prep.per100Protein||0) > 0;
+    return !hasTotals && !hasPer100;
+  };
 
   const toggle=id=>{
+    setLogErr("");
     setSelected(p=>{
       if(p[id]!==undefined){const n={...p};delete n[id];return n;}
       const prep=activePreps.find(x=>x.id===id);
@@ -649,11 +787,18 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose}) {
 
   const confirm=()=>{
     if(!Object.keys(selected).length)return;
+    // Refuse to log a meal where everything is zero — that's the bug from screenshot 2
+    if(grandTotals.kcal === 0 && grandTotals.protein === 0 && grandTotals.carbs === 0 && grandTotals.fat === 0){
+      setLogErr("All macros are zero. The selected prep(s) appear to have no macro data — edit them in the Food tab first.");
+      return;
+    }
     const names=Object.entries(selected).map(([id,g])=>{
-      const prep=activePreps.find(x=>x.id===id);return prep?`${prep.name} ${g}g`:"";
+      const prep=activePreps.find(x=>x.id===id);
+      const safeName = (prep?.name && prep.name.trim()) || "Meal Prep";
+      return prep?`${safeName} ${g}g`:"";
     }).filter(Boolean);
     if(extras.name)names.push(extras.name);
-    const label=names.join(" + ");
+    const label=names.join(" + ") || "Meal Prep";
     onAdd({id:Date.now(),name:label,kcal:Math.round(grandTotals.kcal),protein:Math.round(grandTotals.protein),carbs:Math.round(grandTotals.carbs),fat:Math.round(grandTotals.fat),mealType,notes:"Meal prep",time:new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})});
     // Update remaining grams for each prep
     setMealPreps(ps=>ps.map(p=>{
@@ -675,23 +820,34 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose}) {
     <div style={{display:"flex",flexDirection:"column",gap:7,marginBottom:10}}>
       {activePreps.map(prep=>{
         const isSelected=selected[prep.id]!==undefined;
+        const broken = isPrepBroken(prep);
         const remG=prep.remainingWeightG??prep.totalWeightG??0;
         const totalG=prep.totalWeightG||0;
         const pct=totalG>0?Math.round(remG/totalG*100):0;
         const suggested=prep.suggestedG||prep.portionWeightG||Math.round(remG/Math.max(prep.targetPortions||prep.portions||1,1));
         const preview=isSelected?macrosForPrep(prep,selected[prep.id]):{};
-        return(<div key={prep.id} style={{background:C.card,border:`1px solid ${isSelected?C.lime:C.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer"}} onClick={()=>toggle(prep.id)}>
+        const safeName = (prep.name && prep.name.trim()) || "(unnamed prep)";
+        const borderCol = broken ? C.red+"55" : (isSelected?C.lime:C.border);
+        return(<div key={prep.id} style={{background:C.card,border:`1px solid ${borderCol}`,borderRadius:12,padding:"10px 14px",cursor:broken?"default":"pointer",opacity:broken?0.7:1}} onClick={()=>{if(!broken)toggle(prep.id);}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:13,fontWeight:600,color:isSelected?C.lime:C.text}}>{prep.name}</div>
+              <div style={{fontSize:13,fontWeight:600,color:isSelected?C.lime:C.text}}>{safeName}</div>
               <div style={{fontSize:10,color:C.muted,marginTop:2}}>{Math.round(remG)}g left of {totalG}g · ~{pct}% · suggest {suggested}g/portion</div>
+              {/* Macro preview per portion or per 100g — so user can spot broken preps */}
+              {!broken && <div style={{display:"flex",gap:8,marginTop:4}}>
+                <Chip val={prep.perKcal||0} label="kcal/portion" color={C.lime}/>
+                <Chip val={prep.perProtein||0} label="P" color={C.blue}/>
+                <Chip val={prep.perCarbs||0} label="C" color={C.orange}/>
+                <Chip val={prep.perFat||0} label="F" color={C.purple}/>
+              </div>}
+              {broken && <div style={{fontSize:11,color:C.red,marginTop:4}}>⚠ This prep has no macro data — edit it in Food tab before logging.</div>}
               <div style={{height:3,background:C.dim,borderRadius:2,marginTop:4}}><div style={{height:"100%",width:`${pct}%`,background:C.lime,borderRadius:2}}/></div>
             </div>
-            <div style={{width:20,height:20,borderRadius:"50%",border:`2px solid ${isSelected?C.lime:C.border}`,background:isSelected?C.lime:"none",display:"flex",alignItems:"center",justifyContent:"center",marginLeft:10,flexShrink:0}}>
+            {!broken && <div style={{width:20,height:20,borderRadius:"50%",border:`2px solid ${isSelected?C.lime:C.border}`,background:isSelected?C.lime:"none",display:"flex",alignItems:"center",justifyContent:"center",marginLeft:10,flexShrink:0}}>
               {isSelected&&<span style={{fontSize:12,color:"#000",fontWeight:800}}>✓</span>}
-            </div>
+            </div>}
           </div>
-          {isSelected&&(<div style={{marginTop:8}} onClick={e=>e.stopPropagation()}>
+          {isSelected&&!broken&&(<div style={{marginTop:8}} onClick={e=>e.stopPropagation()}>
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
               <input type="number" value={selected[prep.id]} onChange={e=>setSelected(p=>({...p,[prep.id]:e.target.value}))} placeholder={String(suggested)} style={{width:70,background:C.bg,border:`1px solid ${C.lime}`,borderRadius:6,padding:"6px 8px",color:C.lime,fontSize:14,fontFamily:"monospace",outline:"none",fontWeight:700}}/>
               <span style={{fontSize:12,color:C.muted}}>g</span>
@@ -722,6 +878,8 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose}) {
       <div style={{display:"flex",gap:10}}><Chip val={Math.round(grandTotals.kcal)} label="kcal" color={C.lime}/><Chip val={Math.round(grandTotals.protein)} label="P" color={C.blue}/><Chip val={Math.round(grandTotals.carbs)} label="C" color={C.orange}/><Chip val={Math.round(grandTotals.fat)} label="F" color={C.purple}/></div>
     </div>}
 
+    {logErr&&<div style={{background:"#1e0a0a",border:"1px solid #5a1a1a",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#ff8080",marginBottom:10,wordBreak:"break-word"}}>{logErr}</div>}
+
     <div style={{display:"flex",gap:8}}>
       <button onClick={onClose} style={{flex:1,padding:"11px 0",borderRadius:10,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer"}}>Cancel</button>
       <button onClick={confirm} disabled={!Object.keys(selected).length} style={{flex:2,padding:"11px 0",borderRadius:10,background:Object.keys(selected).length?C.lime:C.faint,color:"#000",fontWeight:700,border:"none",cursor:Object.keys(selected).length?"pointer":"default",fontSize:15}}>Log {Object.keys(selected).length>1?"Combined Prep":"Prep"}</button>
@@ -733,7 +891,8 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
   const [mode,setMode]=useState("photos");const [mt,setMt]=useState("home");const [desc,setDesc]=useState("");const [imgs,setImgs]=useState([]);const [result,setResult]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState(null);const [form,setForm]=useState({name:"",kcal:"",protein:"",carbs:"",fat:"",notes:""});const [mealType,setMealType]=useState("breakfast");const [gramsEaten,setGramsEaten]=useState("");const [per100,setPer100]=useState(null);const [aiNotes,setAiNotes]=useState("");
   const activePreps=mealPreps.filter(p=>p.remaining>0);
   const [ingredients,setIngredients]=useState(null); // detected ingredients for confirmation
-  const analyze=async()=>{setLoading(true);setErr(null);try{
+  const [ingConfirmed,setIngConfirmed]=useState(false); // when true, ingredients exist but user has moved past panel
+  const analyze=async()=>{setLoading(true);setErr(null);setIngConfirmed(false);try{
     const res=await aFood(imgs,products,mt,desc,apiKey);
     setResult(res);
     if(res.type!=="activity"){
@@ -825,9 +984,10 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
     {result&&mode==="photos"&&(<>
       {result.type==="activity"
         ?<div style={{background:"#140e03",border:"1px solid #2e1e07",borderRadius:12,padding:"14px 16px",marginBottom:12}}><div style={{fontSize:12,color:C.muted}}>Activity detected</div><div style={{fontSize:32,fontWeight:800,fontFamily:"monospace",color:C.orange}}>−{Math.round(result.burnedKcal)} kcal</div></div>
-        :ingredients
-          ?(<IngredientConfirmPanel ingredients={ingredients} setIngredients={setIngredients} products={products} onSkip={()=>setIngredients(null)} onConfirm={(ings,totals)=>{const summary=ings.filter(i=>parseFloat(i.weightG)>0).map(i=>i.name+" "+i.weightG+"g").join(", ");setForm(f=>({...f,kcal:String(Math.round(totals.kcal)),protein:String(Math.round(totals.protein*10)/10),carbs:String(Math.round(totals.carbs*10)/10),fat:String(Math.round(totals.fat*10)/10),notes:summary}));setIngredients(null);}}/>)
+        :ingredients&&!ingConfirmed
+          ?(<IngredientConfirmPanel ingredients={ingredients} setIngredients={setIngredients} products={products} apiKey={apiKey} onSkip={()=>setIngConfirmed(true)} onConfirm={(ings,totals)=>{const summary=ings.filter(i=>parseFloat(i.weightG)>0).map(i=>i.name+" "+i.weightG+"g").join(", ");setForm(f=>({...f,kcal:String(Math.round(totals.kcal)),protein:String(Math.round(totals.protein*10)/10),carbs:String(Math.round(totals.carbs*10)/10),fat:String(Math.round(totals.fat*10)/10),notes:summary}));setIngConfirmed(true);}}/>)
           :(<>
+            {ingredients&&<button onClick={()=>setIngConfirmed(false)} style={{width:"100%",padding:"8px 0",borderRadius:8,background:"none",border:`1px solid ${C.border}`,color:C.muted,fontWeight:500,cursor:"pointer",fontSize:12,marginBottom:10}}>← Adjust ingredients</button>}
             {/* Gram correction field */}
             <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px",marginBottom:10}}>
               <div style={{fontSize:11,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Grams / Amount eaten</div>
@@ -848,9 +1008,9 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
             <MacroFields form={form} setForm={setForm}/>
           </>)
       }
-      {!ingredients&&result?.notes&&result.notes.length>3&&<div style={{background:"#0d1a0d",border:"1px solid #1a3a1a",borderRadius:8,padding:"9px 12px",marginTop:8,marginBottom:4}}><div style={{fontSize:10,color:C.lime,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:3}}>AI Notes</div><div style={{fontSize:12,color:"#a0d0a0",lineHeight:1.5}}>{result.notes}</div></div>}
-      {!ingredients&&<div style={{display:"flex",gap:8,marginTop:12}}>
-        <button onClick={()=>setResult(null)} style={{flex:1,padding:"11px 0",borderRadius:10,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer"}}>Back</button>
+      {(!ingredients||ingConfirmed)&&result?.notes&&result.notes.length>3&&<div style={{background:"#0d1a0d",border:"1px solid #1a3a1a",borderRadius:8,padding:"9px 12px",marginTop:8,marginBottom:4}}><div style={{fontSize:10,color:C.lime,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:3}}>AI Notes</div><div style={{fontSize:12,color:"#a0d0a0",lineHeight:1.5}}>{result.notes}</div></div>}
+      {(!ingredients||ingConfirmed)&&<div style={{display:"flex",gap:8,marginTop:12}}>
+        <button onClick={()=>{if(ingredients){setIngConfirmed(false);}else{setResult(null);}}} style={{flex:1,padding:"11px 0",borderRadius:10,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer"}}>{ingredients?"← Ingredients":"← Photos"}</button>
         <button onClick={confirm} style={{flex:2,padding:"11px 0",borderRadius:10,background:C.lime,color:"#000",fontWeight:700,border:"none",cursor:"pointer",fontSize:15}}>{result.type==="activity"?"Log as Activity":"Add to Log"}</button>
       </div>}
     </>)}
@@ -866,9 +1026,9 @@ function AddActSheet({onAdd,onClose,apiKey}){
 }
 
 function CreatePrepSheet({products,onSave,onClose,apiKey}){
-  const [name,setName]=useState("");const [imgs,setImgs]=useState([]);const [desc,setDesc]=useState("");const [result,setResult]=useState(null);const [wt,setWt]=useState("");const [portions,setPortions]=useState("4");const [form,setForm]=useState({kcal:"",protein:"",carbs:"",fat:""});const [loading,setLoading]=useState(false);const [err,setErr]=useState(null);const [prepIngredients,setPrepIngredients]=useState(null);const [saveErr,setSaveErr]=useState("");
+  const [name,setName]=useState("");const [imgs,setImgs]=useState([]);const [desc,setDesc]=useState("");const [result,setResult]=useState(null);const [wt,setWt]=useState("");const [portions,setPortions]=useState("4");const [form,setForm]=useState({kcal:"",protein:"",carbs:"",fat:""});const [loading,setLoading]=useState(false);const [err,setErr]=useState(null);const [prepIngredients,setPrepIngredients]=useState(null);const [ingConfirmed,setIngConfirmed]=useState(false);const [saveErr,setSaveErr]=useState("");
   const f=k=>v=>setForm(p=>({...p,[k]:v}));
-  const analyze=async()=>{setLoading(true);setErr(null);setSaveErr("");try{
+  const analyze=async()=>{setLoading(true);setErr(null);setSaveErr("");setIngConfirmed(false);try{
     const res=await aPrep(imgs,products,desc,apiKey);
     // Detect empty AI response (totals all zero AND no ingredients) — surface a helpful error
     const totalsAllZero=!res.totalKcal&&!res.totalProtein&&!res.totalCarbs&&!res.totalFat;
@@ -900,9 +1060,11 @@ function CreatePrepSheet({products,onSave,onClose,apiKey}){
       return;
     }
     setSaveErr("");
+    // Always have a non-empty name — fall back to first words of description, then "Meal Prep"
+    const finalName = (name && name.trim()) || (desc.trim().split(/[,.]/)[0].trim().slice(0,40)) || "Meal Prep";
     const per100k=Math.round(k/w*100),per100p=Math.round(p/w*100*10)/10,per100c=Math.round(carb/w*100*10)/10,per100f=Math.round(fat/w*100*10)/10;
     const suggestedG=Math.round(w/n);
-    onSave({id:Date.now(),name:name||"Meal Prep",totalKcal:k,totalProtein:p,totalCarbs:carb,totalFat:fat,
+    onSave({id:Date.now(),name:finalName,totalKcal:k,totalProtein:p,totalCarbs:carb,totalFat:fat,
       totalWeightG:w,remainingWeightG:w,targetPortions:n,
       per100Kcal:per100k,per100Protein:per100p,per100Carbs:per100c,per100Fat:per100f,
       suggestedG,
@@ -912,20 +1074,24 @@ function CreatePrepSheet({products,onSave,onClose,apiKey}){
       createdDate:TODAY(),notes:result?.notes||""});
   };
   const totalsZero=!parseFloat(form.kcal)&&!parseFloat(form.protein)&&!parseFloat(form.carbs)&&!parseFloat(form.fat);
+  // Render decision: panel vs form
+  const showPanel = prepIngredients && !ingConfirmed;
+  const showForm  = result && (ingConfirmed || !prepIngredients);
   return(<Sheet onClose={onClose} title="Create Meal Prep">
     <Field label="Prep Name" value={name} onChange={setName} placeholder="e.g. Chicken rice bowl"/>
     <div style={{marginTop:12}}><ImgZone imgs={imgs} setImgs={setImgs} maxPhotos={10}/></div>
     <div style={{marginTop:10}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:4}}>Description (optional but helps)</div><textarea value={desc} onChange={e=>setDesc(e.target.value)} rows={2} placeholder="e.g. 500g chicken, 200g dry rice, peas, soy sauce" style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 11px",color:C.text,fontSize:13,outline:"none",resize:"none",fontFamily:"inherit"}}/></div>
 
     {/* Prominent analyze button — appears as soon as photos are uploaded, before result */}
-    {imgs.length>0&&!result&&!prepIngredients&&<button onClick={analyze} disabled={loading} style={{width:"100%",padding:"14px 0",borderRadius:10,background:loading?C.faint:C.lime,color:"#000",fontWeight:800,border:"none",cursor:loading?"default":"pointer",fontSize:15,marginTop:12,boxShadow:loading?"none":`0 0 12px ${C.lime}40`}}>{loading?"Analyzing — this can take 20-30s with many photos…":`🔍 Analyze ${imgs.length} photo${imgs.length!==1?"s":""}`}</button>}
+    {imgs.length>0&&!result&&!showPanel&&<button onClick={analyze} disabled={loading} style={{width:"100%",padding:"14px 0",borderRadius:10,background:loading?C.faint:C.lime,color:"#000",fontWeight:800,border:"none",cursor:loading?"default":"pointer",fontSize:15,marginTop:12,boxShadow:loading?"none":`0 0 12px ${C.lime}40`}}>{loading?"Analyzing — this can take 20-30s with many photos…":`🔍 Analyze ${imgs.length} photo${imgs.length!==1?"s":""}`}</button>}
     {err&&<div style={{background:"#1e0a0a",border:"1px solid #5a1a1a",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#ff8080",margin:"10px 0",wordBreak:"break-word"}}>{err}</div>}
 
-    {prepIngredients?(<div style={{marginTop:12}}><IngredientConfirmPanel ingredients={prepIngredients} setIngredients={setPrepIngredients} products={products} confirmLabel="Use These Weights →" onSkip={()=>{setPrepIngredients(null);if(!result)setResult(true);}} onConfirm={(ings,totals)=>{const totalG=ings.reduce((s,i)=>s+(parseFloat(i.weightG)||0),0);setForm({kcal:String(Math.round(totals.kcal)),protein:String(Math.round(totals.protein)),carbs:String(Math.round(totals.carbs)),fat:String(Math.round(totals.fat))});if(!wt&&totalG>0)setWt(String(Math.round(totalG)));setPrepIngredients(null);}}/></div>):!result?(<>
+    {showPanel?(<div style={{marginTop:12}}><IngredientConfirmPanel ingredients={prepIngredients} setIngredients={setPrepIngredients} products={products} apiKey={apiKey} confirmLabel="Use These Weights →" onSkip={()=>setIngConfirmed(true)} onConfirm={(ings,totals)=>{const totalG=ings.reduce((s,i)=>s+(parseFloat(i.weightG)||0),0);setForm({kcal:String(Math.round(totals.kcal)),protein:String(Math.round(totals.protein)),carbs:String(Math.round(totals.carbs)),fat:String(Math.round(totals.fat))});if(totalG>0)setWt(String(Math.round(totalG)));setIngConfirmed(true);}}/></div>):!result?(<>
       {/* Manual fallback — clearly demoted vs analyze */}
       {imgs.length===0&&<div style={{textAlign:"center",fontSize:11,color:C.muted,marginTop:14,marginBottom:6}}>Upload photos for AI analysis, or skip to manual entry below</div>}
       <button onClick={()=>setResult(true)} style={{width:"100%",padding:"9px 0",borderRadius:10,background:"none",border:`1px solid ${C.border}`,color:C.muted,fontWeight:500,cursor:"pointer",fontSize:13,marginTop:imgs.length?6:0}}>{imgs.length?"Skip AI · Enter manually":"Enter macros manually"}</button>
     </>):(<>
+      {prepIngredients&&<button onClick={()=>setIngConfirmed(false)} style={{width:"100%",padding:"8px 0",borderRadius:8,background:"none",border:`1px solid ${C.border}`,color:C.muted,fontWeight:500,cursor:"pointer",fontSize:12,marginTop:12,marginBottom:0}}>← Adjust ingredients</button>}
       <div style={{marginTop:12,display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
         <Field label="Total Kcal" value={form.kcal} onChange={f("kcal")} type="number" placeholder="0"/>
         <Field label="Total Protein g" value={form.protein} onChange={f("protein")} type="number" placeholder="0"/>
