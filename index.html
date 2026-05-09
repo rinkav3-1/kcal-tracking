@@ -78,35 +78,62 @@ const ACT_LEVELS = [
   { id:"active",    label:"Very active",       desc:"Physically demanding work",     m:1.6  },
 ];
 const PRESETS = [
-  { name:"Whey Isolate (black tub)",         kcal:370, p:83,    c:6.2,  f:1.5  },
-  { name:"Ryžių košė (Insanefits)",          kcal:352, p:7.1,   c:79,   f:0.7  },
-  { name:"Lidl Natural Yogurt",              kcal:67,  p:11,    c:3.6,  f:0.4  },
-  { name:"Lidl Almond Milk",                 kcal:15,  p:0.5,   c:0,    f:1.4  },
-  { name:"Lidl Long Grain Rice (dry)",       kcal:349, p:8.8,   c:76.5, f:0.4  },
-  { name:"Lidl Frozen Peas",                 kcal:81,  p:5.4,   c:11,   f:0    },
-  { name:"Lidl Corn",                        kcal:69,  p:3.2,   c:11,   f:0.6  },
-  { name:"Lidl Kidney Beans",               kcal:93,  p:7.2,   c:11,   f:0.6  },
-  { name:"Lidl Breaded Chicken Breast",      kcal:213, p:18,    c:13,   f:9.8  },
-  { name:"Lidl Tortilla Wrap (61.7g)",       kcal:310, p:13,    c:52,   f:6.5  },
-  { name:"Pilos HP Cheese Slices",           kcal:198, p:31,    c:0,    f:8.2  },
-  { name:"Lidl HP Quark",                    kcal:69,  p:12.2,  c:4,    f:0.2  },
-  { name:"Nixe Tuna in Brine (drained)",     kcal:119, p:27.8,  c:0,    f:0.9  },
-  { name:"Lidl Salmon Fillets (raw)",        kcal:208, p:20,    c:0,    f:13   },
-  { name:"Kėdainių Tomato Sauce",            kcal:109, p:1.2,   c:25,   f:0    },
-  { name:"Kikkoman Reduced Salt Soy Sauce",  kcal:89,  p:9.7,   c:6.4,  f:0    },
-  { name:"Hellmann's Light Mayo",            kcal:214, p:1.1,   c:8.6,  f:19   },
-  { name:"Crownfield Oats",                  kcal:364, p:14.2,  c:60,   f:7    },
-  { name:"Lidl Crunchy Granola w/ Peanuts",  kcal:454, p:25,    c:50.6, f:15.8 },
-  { name:"PB Protein Bar (60g)",             kcal:219, p:18,    c:21.6, f:8.4  },
-  { name:"Coconut Protein Bar (50g)",        kcal:196, p:16.5,  c:25,   f:6    },
-  { name:"Zuveja African Catfish (raw)",     kcal:185, p:15.36, c:0,    f:12   },
-  { name:"Mexican Veggie Mix",               kcal:60,  p:3.2,   c:10,   f:0.5  },
-  { name:"Julian Bakery ProGranola Espresso",kcal:333, p:33.3,  c:43.3, f:13.3 },
-  { name:"Julian Bakery ProGranola Peanut Butter",kcal:400,p:36.67,c:40,   f:18.33},
-  { name:"Pilos HP Natural Yogurt",              kcal:67,  p:11,   c:3.6,  f:0.4  },
-  { name:"Pilos Liesa Varškė 0.5%",         kcal:98,  p:19.8,  c:3.1,  f:0.3  },
-  { name:"Lidl Spicy Mustard",               kcal:149, p:7.2,   c:1.8,  f:11   },
-  { name:"Kania Dijon Mustard",              kcal:110, p:3.7,   c:6,    f:7    },
+  // Dairy / Curd / Yogurt
+  { name:"Pilos HP Natural Yogurt",              kcal:67,  p:11,    c:3.6,  f:0.4  },
+  { name:"Pilos Liesa Varškė 0.5%",              kcal:98,  p:19.8,  c:3.1,  f:0.3  },
+  { name:"Vilkyškių Liesa Varškė 0.5%",          kcal:82,  p:16,    c:3.6,  f:0.5  },
+  { name:"Pilos HP Cheese Slices",               kcal:198, p:31,    c:0,    f:8.2  },
+  { name:"Pilos Lydytas Tepamas Sūrelis Klasikinis", kcal:247, p:11,    c:3.5,  f:21   },
+  { name:"Lidl HP Quark",                        kcal:69,  p:12.2,  c:4,    f:0.2  },
+  { name:"Lidl Strawberry Milk Product",         kcal:65,  p:10,    c:6,    f:0.3  },
+  { name:"Lidl Almond Milk (Vemondo Bio)",       kcal:14,  p:0.45,  c:0.1,  f:1.25 },
+  // Meat / Fish / Protein
+  { name:"Lidl Breaded Chicken Breast",          kcal:213, p:18,    c:13,   f:9.8  },
+  { name:"Lidl Vištienos Kepsneliai (cooked chicken strips)", kcal:167, p:17.8, c:10.8, f:5.5 },
+  { name:"Lidl Brandinta Smulkinta Jautiena (raw ground beef)", kcal:169, p:20, c:0, f:9.9 },
+  { name:"Lidl Salmon Fillets (raw)",            kcal:208, p:20,    c:0,    f:13   },
+  { name:"Pikon Karštai Rūkyta Kalakutų Krūtinėlė", kcal:106, p:22, c:0.5, f:1.9 },
+  { name:"Nixe Tuna in Brine (drained)",         kcal:119, p:27.8,  c:0,    f:0.9  },
+  { name:"Zuveja African Catfish (raw)",         kcal:185, p:15.36, c:0,    f:12   },
+  // Carbs / Grains
+  { name:"Lidl Long Grain Rice (dry)",           kcal:349, p:8.8,   c:76.5, f:0.4  },
+  { name:"Insanefits Ryžių košė",                kcal:352, p:7.1,   c:79,   f:0.7  },
+  { name:"Crownfield Oats",                      kcal:364, p:14.2,  c:60,   f:7    },
+  { name:"Malsena Viso Grūdo Avižiniai Miltai",  kcal:369, p:13.2,  c:67.9, f:7.2  },
+  { name:"Lidl Tortilla Wrap (61.7g each)",      kcal:310, p:13,    c:52,   f:6.5  },
+  { name:"Lidl Koldūnai su Mėsa (frozen)",       kcal:270, p:9.2,   c:32.8, f:10.1 },
+  // Vegetables / Frozen
+  { name:"Lidl Frozen Peas",                     kcal:81,  p:5.4,   c:11,   f:0    },
+  { name:"Lidl Green Beans (frozen)",            kcal:31,  p:2.2,   c:3.3,  f:0.5  },
+  { name:"Freshona Green Beans Cut (frozen)",    kcal:31,  p:1.8,   c:5.7,  f:0.2  },
+  { name:"Lidl Canned Corn",                     kcal:69,  p:3.2,   c:11,   f:0.6  },
+  { name:"Lidl Red Kidney Beans",                kcal:93,  p:7.2,   c:11,   f:0.6  },
+  { name:"Freshona Berry Mix with Sour Cherries", kcal:40, p:0.8,   c:8.5,  f:0.3  },
+  { name:"Freshona Frozen Raspberries",          kcal:49,  p:1.3,   c:5.3,  f:0.3  },
+  { name:"Rimi Šilauogės (Frozen Blueberries)",  kcal:57,  p:0.7,   c:14,   f:0.3  },
+  // Sauces / Condiments
+  { name:"Kėdainių Tomato Sauce",                kcal:109, p:1.2,   c:25,   f:0    },
+  { name:"Kikkoman Reduced Salt Soy Sauce",      kcal:89,  p:9.7,   c:6.4,  f:0    },
+  { name:"Lidl Spicy Mustard",                   kcal:149, p:7.2,   c:1.8,  f:11   },
+  { name:"Kania Dijon Mustard",                  kcal:110, p:3.7,   c:6,    f:7    },
+  { name:"Hellmann's Light Mayo",                kcal:214, p:1.1,   c:8.6,  f:19   },
+  { name:"N!CK's Fiber Syrup Honey Flavor",      kcal:151, p:0,     c:14,   f:0    },
+  { name:"Della Sante Dubai Chocolate Cream",    kcal:560, p:8.8,   c:49,   f:36   },
+  // Whey / Protein supplements
+  { name:"Whey Isolate (Insanefits black tub)",  kcal:370, p:83,    c:6.2,  f:1.5  },
+  { name:"Insanefits Snickers Whey Isolate",     kcal:370, p:83,    c:6.2,  f:1.5  },
+  { name:"ProWhey Vanilla Ice Cream (black tub)",kcal:366, p:82,    c:4.1,  f:1.6  },
+  // Granola / Snacks
+  { name:"Julian Bakery ProGranola Espresso",    kcal:333, p:33.3,  c:43.3, f:13.3 },
+  { name:"Julian Bakery ProGranola Peanut Butter", kcal:400, p:36.7, c:40,  f:18.3 },
+  { name:"Lidl Crunchy Granola w/ Peanuts",      kcal:454, p:25,    c:50.6, f:15.8 },
+  { name:"The Heart High-Protein Granola",       kcal:333, p:33.3,  c:43.3, f:13.3 },
+  // Protein bars
+  { name:"ProPud Smooth Caramel Bar (55g)",      kcal:363, p:32,    c:30,   f:16   },
+  { name:"ProPud Cookie Dough Bar (55g)",        kcal:423, p:33,    c:32,   f:22   },
+  { name:"ME2U Peanut Butter Protein Bar (60g)", kcal:365, p:30,    c:36,   f:14   },
+  { name:"FitSpo Dubai Chocolate Style Bar (50g)", kcal:396, p:17.7, c:34.3, f:17.7 },
+  { name:"Lidl Pea Crackers Cheese & Onion (70g pack)", kcal:411, p:24, c:47.9, f:11.7 },
 ];
 const C = {
   bg:"#0b0b0e",surf:"#111116",card:"#16161d",border:"#1e1e2a",dim:"#2a2a36",faint:"#33333f",
@@ -224,7 +251,7 @@ async function callAI(content, apiKey, model, maxTokens) {
     headers["anthropic-version"] = "2023-06-01";
     headers["anthropic-dangerous-direct-browser-access"] = "true";
   }
-  const body = JSON.stringify({ model: model||AI_MODEL, max_tokens: maxTokens||1500, messages: [{ role: "user", content }] });
+  const body = JSON.stringify({ model: model||VISION_MODEL, max_tokens: maxTokens||1500, messages: [{ role: "user", content }] });
   // Use the exact pattern from Claude.ai artifact docs: fetch then .json()
   let data;
   try {
@@ -247,7 +274,7 @@ async function callAIText(content, apiKey, model, maxTokens) {
     headers["anthropic-version"] = "2023-06-01";
     headers["anthropic-dangerous-direct-browser-access"] = "true";
   }
-  const body = JSON.stringify({ model: model||AI_MODEL, max_tokens: maxTokens||1500, messages: [{ role: "user", content }] });
+  const body = JSON.stringify({ model: model||VISION_MODEL, max_tokens: maxTokens||1500, messages: [{ role: "user", content }] });
   let data;
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers, body });
@@ -387,7 +414,7 @@ async function aCoach({question, context, history}, apiKey) {
     headers["anthropic-version"] = "2023-06-01";
     headers["anthropic-dangerous-direct-browser-access"] = "true";
   }
-  const body = JSON.stringify({ model: AI_MODEL, max_tokens: 1500, system: sys, messages });
+  const body = JSON.stringify({ model: VISION_MODEL, max_tokens: 1500, system: sys, messages });
   const response = await fetch("https://api.anthropic.com/v1/messages", { method:"POST", headers, body });
   const data = await response.json();
   if (data.error) throw new Error("API: " + (data.error.message || JSON.stringify(data.error)));
@@ -939,7 +966,9 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose}) {
   };
 
   const totals=Object.entries(selected).reduce((acc,[id,g])=>{
-    const prep=activePreps.find(x=>x.id===id);if(!prep)return acc;
+    // id from Object.entries is always a string; prep.id is a number (Date.now()).
+    // Use loose comparison or coerce so the find succeeds.
+    const prep=activePreps.find(x=>String(x.id)===id);if(!prep)return acc;
     const m=macrosForPrep(prep,g);
     return{kcal:acc.kcal+m.kcal,protein:acc.protein+m.protein,carbs:acc.carbs+m.carbs,fat:acc.fat+m.fat};
   },{kcal:0,protein:0,carbs:0,fat:0});
@@ -953,7 +982,7 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose}) {
       return;
     }
     const names=Object.entries(selected).map(([id,g])=>{
-      const prep=activePreps.find(x=>x.id===id);
+      const prep=activePreps.find(x=>String(x.id)===id);
       const safeName = (prep?.name && prep.name.trim()) || "Meal Prep";
       return prep?`${safeName} ${g}g`:"";
     }).filter(Boolean);
@@ -1309,7 +1338,7 @@ function TodayTab({dayData,setDayData,mealPreps,setMealPreps,products,setProduct
       <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 14px",marginBottom:10}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
           <span style={{fontSize:11,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}>Weight today</span>
-          {todayW&&<div style={{display:"flex",alignItems:"baseline",gap:6}}><span style={{fontFamily:"monospace",fontSize:18,fontWeight:800,color:C.lime}}>{todayW.weight.toFixed(2)}</span><span style={{fontSize:12,color:C.muted}}>kg</span>{wDelta!==null&&<span style={{fontFamily:"monospace",fontSize:12,color:wDelta<0?C.lime:C.red}}>{wDelta<0?"↓":"↑"}{Math.abs(wDelta).toFixed(2)}</span>}</div>}
+          {todayW&&<div style={{display:"flex",alignItems:"baseline",gap:6}}><span style={{fontFamily:"monospace",fontSize:18,fontWeight:800,color:C.lime}}>{todayW.weight.toFixed(2)}</span><span style={{fontSize:12,color:C.muted}}>kg</span>{wDelta!==null&&<span style={{fontFamily:"monospace",fontSize:11,color:wDelta<0?C.lime:C.red}} title="Difference from previous logged weight">{wDelta<0?"↓":"↑"}{Math.abs(wDelta).toFixed(2)} vs prev</span>}</div>}
         </div>
         <div style={{display:"flex",gap:8}}>
           <input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" step="0.05" placeholder={todayW?"Update weight…":"e.g. 75.00"} value={wInput} onChange={e=>setWInput(e.target.value.replace(",","."))} onKeyDown={e=>e.key==="Enter"&&logWeight()} style={{flex:1,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"7px 10px",color:C.text,fontSize:14,fontFamily:"monospace",outline:"none"}}/>
@@ -1408,7 +1437,10 @@ function ActivityTab({dayData,setDayData,profile,weights,setWeights}){
   const addActivity=act=>{setDayData(p=>({...p,activities:[...(p.activities||[]),act]}));setModal(false);};
   const delActivity=id=>{setDayData(p=>({...p,activities:(p.activities||[]).filter(a=>a.id!==id)}));};
   const [wInput,setWInput]=useState("");const [editWIdx,setEditWIdx]=useState(null);const [editWVal,setEditWVal]=useState("");const [wDate,setWDate]=useState(TODAY());
-  const latestW=weights[0];const trend2=weights.length>=2?weights[0].weight-weights[1].weight:null;
+  const latestW=weights[0];
+  // Overall change since first logged weight (oldest entry — last in array since sort is desc).
+  const firstW=weights.length>=2?weights[weights.length-1]:null;
+  const overallDelta=firstW&&latestW?latestW.weight-firstW.weight:null;
   const logWeight=()=>{const w=parseNum(wInput);if(!w)return;const date=wDate||TODAY();const e={date,weight:w};setWeights(p=>[e,...p.filter(x=>x.date!==date)].sort((a,b)=>b.date.localeCompare(a.date)));setWInput("");setWDate(TODAY());};
   const saveEditW=i=>{const w=parseNum(editWVal);if(!w)return;setWeights(p=>{const n=[...p];n[i]={...n[i],weight:w};return n.sort((a,b)=>b.date.localeCompare(a.date));});setEditWIdx(null);};
   // Weight chart data
@@ -1426,7 +1458,7 @@ function ActivityTab({dayData,setDayData,profile,weights,setWeights}){
       <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 14px",marginBottom:12}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
           <span style={{fontSize:11,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}>Weight Log</span>
-          {latestW&&<div style={{display:"flex",alignItems:"baseline",gap:6}}><span style={{fontFamily:"monospace",fontSize:18,fontWeight:800,color:C.lime}}>{latestW.weight.toFixed(2)}</span><span style={{fontSize:12,color:C.muted}}>kg</span>{trend2!==null&&<span style={{fontFamily:"monospace",fontSize:12,color:trend2<0?C.lime:C.red}}>{trend2<0?"↓":"↑"}{Math.abs(trend2).toFixed(2)}</span>}</div>}
+          {latestW&&<div style={{display:"flex",alignItems:"baseline",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}><span style={{fontFamily:"monospace",fontSize:18,fontWeight:800,color:C.lime}}>{latestW.weight.toFixed(2)}</span><span style={{fontSize:12,color:C.muted}}>kg</span>{overallDelta!==null&&<span style={{fontFamily:"monospace",fontSize:11,color:overallDelta<0?C.lime:C.red}} title={"Total change since first log on "+firstW.date}>{overallDelta<0?"↓":"↑"}{Math.abs(overallDelta).toFixed(2)} since start</span>}</div>}
         </div>
         {wSpark.length>=4&&(<svg width={WW} height={WH} style={{display:"block",marginBottom:6,overflow:"visible"}}>
           {/* Trend line */}
@@ -1991,7 +2023,23 @@ function App(){
   const [tab,setTab]=useState("today");const [dayData,setDayData_]=useState(null);const [weights,setWeights_]=useState([]);const [products,setProducts_]=useState([]);const [mealPreps,setMealPreps_]=useState([]);const [profile,setProfile_]=useState(null);const [progressPhotos,setProgressPhotos_]=useState([]);const [ready,setReady]=useState(false);
   const today=TODAY();
   useEffect(()=>{(async()=>{
-    const prods=await store.get("fit_products",null)||PRESETS;
+    let prods=await store.get("fit_products",null);
+    if(!prods){
+      // First launch — seed with full preset list
+      prods = [...PRESETS];
+      await store.set("fit_products", prods);
+    } else {
+      // App update — merge any new PRESETS that aren't in the user's product list yet.
+      // Match by normalized name (lowercase, accent-stripped, trimmed) so we don't add duplicates.
+      const norm = s => (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim();
+      const existingNames = new Set(prods.map(p=>norm(p.name)));
+      const newOnes = PRESETS.filter(p => !existingNames.has(norm(p.name)));
+      if (newOnes.length > 0) {
+        prods = [...prods, ...newOnes];
+        await store.set("fit_products", prods);
+        console.log("[update] Added " + newOnes.length + " new preset products");
+      }
+    }
     const day=await store.get(`fit_day_${today}`,{date:today,dayType:"rest",meals:[],activities:[],burnedExtra:0,tags:[],goalMode:null});
     if(!day.activities)day.activities=[];if(!day.tags)day.tags=[];
     const wts=await store.get("fit_weights",[]);const preps=await store.get("fit_mealpreps",[]);
