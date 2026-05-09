@@ -296,16 +296,26 @@ async function aFood(imgs, ps, mt, desc, apiKey) {
     prompt = "Precision nutrition analyst with kitchen scale photos.\n"
       + (desc ? "MEAL DESCRIPTION — use this to identify ingredients and match products: " + desc + "\n" : "")
       + "Known products per 100g: " + ctx + "\n\n"
-      + "CRITICAL RULES:\n"
+      + "PHOTO TYPES YOU MAY SEE:\n"
+      + "  • SCALE PHOTO — a kitchen scale display showing a gram number. The number on the display IS THE EXACT WEIGHT THE USER ACTUALLY USED. The scale is zeroed between ingredients.\n"
+      + "  • PACKAGE PHOTO — a product label/wrapper, used ONLY to identify what the ingredient is (so you can match it to a known product or read its name).\n"
+      + "  • COMBINED — both a package and a scale visible; the scale number is still the truth.\n\n"
+      + "═══ WEIGHT DETERMINATION — READ CAREFULLY ═══\n"
+      + "STEP 1: Count the SCALE photos. Each scale photo corresponds to one ingredient.\n"
+      + "STEP 2: For each scale photo, the weightG = THE EXACT NUMBER ON THE SCALE DISPLAY. Nothing else.\n"
+      + "STEP 3: Match each scale reading to its ingredient using package photos and description for identification.\n"
+      + "STEP 4: ⚠ THE GRAMS PRINTED ON A PACKAGE LABEL (e.g. \"180g\", \"250g\", \"500g\") IS THE PACKAGE SIZE, NOT HOW MUCH THE USER USED. DO NOT COPY THIS NUMBER INTO weightG when a scale photo is present.\n"
+      + "STEP 5: Only use the printed package weight as the consumed amount when (a) NO scale photo exists for that ingredient AND (b) it's a single-serve item where eating the whole package is plausible (chip bag, protein bar, single sachet).\n\n"
+      + "EXAMPLE 1: User shows a 180g curd package AND a scale reading 95g. → weightG = 95 (scale truth). The 180g on the package is irrelevant.\n"
+      + "EXAMPLE 2: User shows a Pilos yogurt package AND a scale reading 200g. → weightG = 200. (The 350g pot size on the package is irrelevant.)\n"
+      + "EXAMPLE 3: User shows ONLY a 55g protein bar wrapper, no scale. → weightG = 55 (assumed whole bar).\n"
+      + "EXAMPLE 4: Egg shell visible alongside scale reading 55g → eggs already cracked, weightG = 55.\n\n"
+      + "OTHER RULES:\n"
       + "1. DESCRIPTION PRIORITY: if the description names a specific product or flavour, match it EXACTLY from known products list.\n"
-      + "2. SCALE VISIBLE: the scale number is ABSOLUTE TRUTH. Always use it. Never override it with a packaging weight or an estimate. The scale is zeroed per ingredient.\n"
-      + "3. NO SCALE but whole packaged product shown (bar, jar, sachet): use the FULL PACKAGE WEIGHT printed on packaging (e.g. 55g bar = 55g). Read it from the package.\n"
-      + "4. Egg shell visible = eggs already cracked in, scale shows their weight.\n"
-      + "5. Identify EVERY ingredient across ALL " + compressed.length + " photos. Skip none — small items like syrups, oils, sweeteners count.\n"
-      + "6. Per ingredient: kcal/protein/carbs/fat MUST be PER-100g reference values for that ingredient (NOT scaled to weight). If matched to a known product, copy its per-100g values exactly. If not matched, give standard reference per-100g values for that food.\n"
-      + "7. weightG = the actual scale/package gram weight.\n"
-      + "8. Top-level kcal/protein/carbs/fat = meal totals (already scaled). totalGrams = sum of weightG.\n"
-      + "9. Unknown product: if label visible in photo, read it and populate newProduct with brand name and per-100g macros.\n\n"
+      + "2. Identify EVERY ingredient across ALL " + compressed.length + " photos. Skip none — small items like syrups, oils, sweeteners count.\n"
+      + "3. Per ingredient: kcal/protein/carbs/fat MUST be PER-100g reference values for that ingredient (NOT scaled to weight). If matched to a known product, copy its per-100g values exactly. If not matched, give standard reference per-100g values for that food.\n"
+      + "4. Top-level kcal/protein/carbs/fat = meal totals (already scaled): sum of (per-100g × weightG / 100). totalGrams = sum of weightG.\n"
+      + "5. Unknown product: if label visible in photo, read it and populate newProduct with brand name and per-100g macros.\n\n"
       + "Reply ONLY with this JSON:\n"
       + '{"type":"meal","name":"","kcal":0,"protein":0,"carbs":0,"fat":0,"totalGrams":0,"notes":"","newProduct":{"name":"","kcal":0,"p":0,"c":0,"f":0},"ingredients":[{"name":"","weightG":0,"kcal":0,"protein":0,"carbs":0,"fat":0}]}';
   }
@@ -323,19 +333,25 @@ async function aAct(imgs, apiKey) {
 async function aPrep(imgs, ps, desc, apiKey) {
   const c = await prepImgs(imgs);
   return callAI([
-    { type:"text", text:"You are analyzing photos of a meal prep build. Photos may include any of:\n"
-      + "  (a) An ingredient on a kitchen scale — the digits shown ARE the exact gram weight (scale is zeroed between items).\n"
-      + "  (b) A product package being scanned — used to identify what the ingredient IS (find it in the known products list below).\n"
-      + "  (c) The mixed/finished container — context only, not a separate ingredient.\n"
+    { type:"text", text:"You are analyzing photos of a meal prep build.\n"
+      + "PHOTO TYPES YOU MAY SEE:\n"
+      + "  • SCALE PHOTO — a kitchen scale display showing a gram number. The number on the display IS THE EXACT WEIGHT THE USER ACTUALLY USED. The scale is zeroed between ingredients.\n"
+      + "  • PACKAGE PHOTO — a product label/wrapper, used ONLY to identify what the ingredient is.\n"
+      + "  • FINISHED CONTAINER — context only, NOT a separate ingredient.\n"
       + (desc ? "Description: " + desc + "\n" : "")
       + "Known products per 100g: " + pCtx(ps) + "\n\n"
-      + "RULES:\n"
-      + "1. Pair package photos with their corresponding scale photo when possible — this gives you BOTH the product identity AND the weight.\n"
-      + "2. List EVERY ingredient that appears on a scale across ALL " + c.length + " photos. Count them carefully — small additions like syrups, oils, sweeteners, nuts, seeds, sauces still count. Do not skip any.\n"
-      + "3. The kcal/protein/carbs/fat fields you return MUST be PER-100g reference values for that ingredient (NOT per-serving, NOT scaled to the weight). If you matched a known product, copy its per-100g values exactly.\n"
-      + "4. The weightG field is the gram weight from the scale (or your best estimate if no scale shown).\n"
-      + "5. totalKcal/totalProtein/totalCarbs/totalFat at the top level ARE the meal totals (already scaled): sum of (per-100g × weightG / 100) across all ingredients.\n"
-      + "6. estimatedWeightG = sum of all ingredient weightG.\n\n"
+      + "═══ WEIGHT DETERMINATION — READ CAREFULLY ═══\n"
+      + "STEP 1: Count the SCALE photos. Each scale photo = one ingredient with a definite weight.\n"
+      + "STEP 2: For each scale photo, the weightG = THE EXACT NUMBER ON THE SCALE DISPLAY.\n"
+      + "STEP 3: Match each scale reading to its ingredient using package photos and description for identification.\n"
+      + "STEP 4: ⚠ THE GRAMS PRINTED ON A PACKAGE LABEL (e.g. \"180g\", \"250g\", \"500g\") IS THE PACKAGE SIZE, NOT HOW MUCH WAS USED. DO NOT copy that number into weightG when a scale photo exists for that ingredient.\n"
+      + "STEP 5: Only use the printed package weight as the consumed amount when there's no scale photo for that ingredient AND it's a small single-serve item.\n\n"
+      + "EXAMPLE: User shows a 180g curd package AND a scale reading 95g. → weightG = 95 (scale truth). The 180g on the package is irrelevant.\n\n"
+      + "OTHER RULES:\n"
+      + "1. List EVERY ingredient that appears on a scale across ALL " + c.length + " photos. Count them carefully — small additions like syrups, oils, sweeteners, nuts, seeds, sauces still count. Do not skip any.\n"
+      + "2. The kcal/protein/carbs/fat fields you return MUST be PER-100g reference values for that ingredient (NOT per-serving, NOT scaled to the weight). If you matched a known product, copy its per-100g values exactly.\n"
+      + "3. totalKcal/totalProtein/totalCarbs/totalFat at the top level ARE the meal totals (already scaled): sum of (per-100g × weightG / 100) across all ingredients.\n"
+      + "4. estimatedWeightG = sum of all ingredient weightG.\n\n"
       + "Reply ONLY with JSON, no explanation:\n"
       + '{"totalKcal":0,"totalProtein":0,"totalCarbs":0,"totalFat":0,"estimatedWeightG":0,"notes":"","ingredients":[{"name":"","weightG":0,"kcal":0,"protein":0,"carbs":0,"fat":0}]}' },
     ...iBlks(c),
@@ -735,7 +751,8 @@ function IngredientConfirmPanel({ingredients, setIngredients, products, onConfir
   return (
     <div>
       <div style={{fontSize:12,fontWeight:600,color:C.text,marginBottom:3}}>Confirm Ingredients</div>
-      <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Tap row for details · ⇄ swap · 🤖 estimate when no label</div>
+      <div style={{fontSize:11,color:C.muted,marginBottom:4}}>Tap row for details · ⇄ swap · 🤖 estimate when no label</div>
+      <div style={{fontSize:10,color:C.yellow,marginBottom:10,lineHeight:1.4,background:C.yellow+"10",border:`1px solid ${C.yellow}30`,borderRadius:6,padding:"6px 9px"}}>⚠ Verify each weight matches what your scale showed in the photo. Package labels list the package size (e.g. 180g pack), not what you ate.</div>
       <div style={{display:"flex",flexDirection:"column",gap:7,marginBottom:10}}>
         {ingredients.map((ing, i) => {
           const m = macrosFor(ing);
