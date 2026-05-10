@@ -327,20 +327,32 @@ async function aFood(imgs, ps, mt, desc, apiKey) {
       + "  • SCALE PHOTO — a kitchen scale display showing a gram number. The number on the display IS THE EXACT WEIGHT THE USER ACTUALLY USED. The scale is zeroed between ingredients.\n"
       + "  • PACKAGE PHOTO — a product label/wrapper, used ONLY to identify what the ingredient is (so you can match it to a known product or read its name).\n"
       + "  • COMBINED — both a package and a scale visible; the scale number is still the truth.\n\n"
-      + "═══ WEIGHT DETERMINATION — READ THIS BEFORE ANYTHING ELSE ═══\n"
-      + "🚫 ABSOLUTELY FORBIDDEN: Setting weightG to 100 as a default/guess. Do NOT use 100g as a fallback. NEVER set every ingredient to 100g. If you set multiple ingredients to identical round numbers (100, 50, 200), you are GUESSING and that is WRONG.\n\n"
-      + "STEP 1: For EACH photo, identify whether it's a SCALE photo (digits on a scale display visible) or a PACKAGE photo.\n"
-      + "STEP 2: For each SCALE photo, READ THE DIGITS CAREFULLY. The scale display will show something like '95', '188', '52', '267'. Read each digit one by one. The reading might have a trailing '.5' or be just an integer. If the display is partly obscured or unreadable, output the LITERAL reading you see — do NOT round to a nice number like 100.\n"
-      + "STEP 3: weightG = EXACTLY the number you read from the scale. If you read '188', weightG = 188. If '52', weightG = 52. If '267', weightG = 267.\n"
-      + "STEP 4: ⚠ If you cannot clearly read the scale digits in any photo, set weightG to a clearly-flagged best estimate based on visible volume/portion in the bowl, and add a 'weightUncertain': true flag in the ingredient. Do NOT silently default to 100g.\n"
-      + "STEP 5: ⚠ THE GRAMS PRINTED ON A PACKAGE LABEL ('500g pack', '180g pack', '450g net weight') IS THE PACKAGE SIZE, NOT HOW MUCH WAS USED. DO NOT copy this into weightG when a scale photo exists.\n"
-      + "STEP 6: Only use printed package weight as the consumed amount when (a) NO scale photo exists for that ingredient AND (b) it's a small single-serve item plausibly eaten whole (chip bag, protein bar, sachet).\n\n"
-      + "EXAMPLES:\n"
-      + "  • Scale shows '188' next to raspberries: weightG = 188. NOT 100, NOT 200. Exactly 188.\n"
-      + "  • Scale shows '95' next to curd, package shows '180g': weightG = 95 (scale wins).\n"
-      + "  • Scale shows '52' next to green beans: weightG = 52. NOT 50, NOT 150. Read it carefully.\n"
-      + "  • Three scale photos showing 188, 188, 51: weightG values are 188, 188, 51 — NOT 100/100/100.\n"
-      + "  • Protein bar wrapper only, no scale, '55g' on package: weightG = 55 (whole bar consumed).\n\n"
+      + "═══ READING THE SCALE DISPLAY — CRITICAL ═══\n"
+      + "Kitchen scales use 7-segment LCD displays. These displays often show TWO things at once:\n"
+      + "  (A) FAINT GHOST DIGITS: a dim '188' or '1888' or '8888' shown in low contrast on one side. These are NOT the weight — they're the LCD's inactive segments showing through, or a tare/zero indicator. IGNORE THEM.\n"
+      + "  (B) THE REAL WEIGHT: shown brightly/boldly, usually with a 'g' unit suffix. This is the only number you want.\n\n"
+      + "RULE: The number you return as weightG is ONLY the bright digits next to the 'g' or 'g/oz' unit label — usually on the RIGHT side of the display. NEVER concatenate or merge ghost digits with real digits.\n\n"
+      + "EXAMPLES OF LCD DISPLAYS:\n"
+      + "  • Display shows faint '1888' on left and bold '47' on right with 'g' label → weightG = 47 (NOT 188, NOT 1888, NOT 18847, NOT 147)\n"
+      + "  • Display shows faint '888' and bold '20g' → weightG = 20 (NOT 88820, NOT 120)\n"
+      + "  • Display shows faint '188' and bold '77g' → weightG = 77 (NOT 18877, NOT 177)\n"
+      + "  • Display shows ONLY '95g' brightly → weightG = 95\n"
+      + "  • Display shows 'NET' or 'TARE' indicator — that's a label, not a digit\n\n"
+      + "🚫 ABSOLUTELY FORBIDDEN:\n"
+      + "  • Setting weightG to 100 as a default/guess.\n"
+      + "  • Setting multiple ingredients to identical round numbers (100/100/100, 50/100/150).\n"
+      + "  • Concatenating ghost LCD digits with the real weight (e.g. reading faint '188' + real '47' as '147' or '1847').\n"
+      + "  • Adding any digit you 'think might be there' that isn't clearly bright on the display.\n\n"
+      + "OTHER WEIGHT RULES:\n"
+      + "  • Each scale photo = one ingredient with a definite weight. The scale is zeroed between ingredients.\n"
+      + "  • If you genuinely cannot read the bright digits, set 'weightUncertain': true and give a reasonable estimate based on visible portion size — do NOT silently use 100.\n"
+      + "  • THE GRAMS PRINTED ON A PACKAGE LABEL ('180g pack', '450g net weight') IS THE PACKAGE SIZE, NOT HOW MUCH WAS USED. Don't copy package size into weightG when a scale photo exists.\n"
+      + "  • Only use printed package weight as the consumed amount when there's NO scale photo for that ingredient AND it's a single-serve item plausibly eaten whole (chip bag, protein bar, sachet).\n\n"
+      + "MORE EXAMPLES:\n"
+      + "  • User shows a 180g curd package AND a scale display with bright '95g' (and maybe faint ghost digits): weightG = 95.\n"
+      + "  • User shows yogurt pot AND scale with bright '20g' (faint ghost on left): weightG = 20.\n"
+      + "  • User shows almond milk carton (1L) AND scale showing '90g': weightG = 90.\n"
+      + "  • User shows ONLY a 55g protein bar wrapper, no scale: weightG = 55 (assumed whole bar).\n\n"
       + "OTHER RULES:\n"
       + "1. DESCRIPTION PRIORITY: if the description names a specific product or flavour, match it EXACTLY from known products list.\n"
       + "2. Identify EVERY ingredient across ALL " + compressed.length + " photos. Skip none — small items like syrups, oils, sweeteners count.\n"
@@ -371,13 +383,21 @@ async function aPrep(imgs, ps, desc, apiKey) {
       + "  • FINISHED CONTAINER — context only, NOT a separate ingredient.\n"
       + (desc ? "Description: " + desc + "\n" : "")
       + "Known products per 100g: " + pCtx(ps) + "\n\n"
-      + "═══ WEIGHT DETERMINATION — READ CAREFULLY ═══\n"
-      + "STEP 1: Count the SCALE photos. Each scale photo = one ingredient with a definite weight.\n"
-      + "STEP 2: For each scale photo, the weightG = THE EXACT NUMBER ON THE SCALE DISPLAY.\n"
-      + "STEP 3: Match each scale reading to its ingredient using package photos and description for identification.\n"
-      + "STEP 4: ⚠ THE GRAMS PRINTED ON A PACKAGE LABEL (e.g. \"180g\", \"250g\", \"500g\") IS THE PACKAGE SIZE, NOT HOW MUCH WAS USED. DO NOT copy that number into weightG when a scale photo exists for that ingredient.\n"
-      + "STEP 5: Only use the printed package weight as the consumed amount when there's no scale photo for that ingredient AND it's a small single-serve item.\n\n"
-      + "EXAMPLE: User shows a 180g curd package AND a scale reading 95g. → weightG = 95 (scale truth). The 180g on the package is irrelevant.\n\n"
+      + "═══ READING THE SCALE DISPLAY — CRITICAL ═══\n"
+      + "Kitchen scales use 7-segment LCD displays. They often show TWO things at once:\n"
+      + "  (A) FAINT GHOST DIGITS: a dim '188' or '1888' or '8888' on one side, low contrast — this is the LCD's inactive segments or a tare indicator. IGNORE THEM.\n"
+      + "  (B) THE REAL WEIGHT: shown brightly with a 'g' suffix. This is the only number you want.\n\n"
+      + "RULE: weightG is ONLY the bright digits next to the 'g' label. NEVER concatenate ghost digits with real digits.\n"
+      + "  • Faint '1888' + bright '47g' → weightG = 47 (NOT 1888, NOT 18847, NOT 147)\n"
+      + "  • Faint '888' + bright '20g' → weightG = 20\n"
+      + "  • Faint '188' + bright '77g' → weightG = 77\n"
+      + "  • Bright '95g' alone → weightG = 95\n\n"
+      + "🚫 ABSOLUTELY FORBIDDEN: setting weightG to 100 as a guess; identical round numbers across multiple ingredients; concatenating ghost digits with the real reading.\n\n"
+      + "OTHER WEIGHT RULES:\n"
+      + "  • Each scale photo = one ingredient. The scale is zeroed between ingredients.\n"
+      + "  • If you genuinely cannot read the bright digits, set 'weightUncertain': true and estimate from visible portion — do NOT silently use 100.\n"
+      + "  • PACKAGE WEIGHT (e.g. '180g pack', '450g net weight') = package SIZE, NOT what was used. Don't copy that into weightG when a scale exists.\n"
+      + "  • Use printed package weight as consumed amount only when there's no scale AND it's a single-serve item.\n\n"
       + "OTHER RULES:\n"
       + "1. List EVERY ingredient that appears on a scale across ALL " + c.length + " photos. Count them carefully — small additions like syrups, oils, sweeteners, nuts, seeds, sauces still count. Do not skip any.\n"
       + "2. The kcal/protein/carbs/fat fields you return MUST be PER-100g reference values for that ingredient (NOT per-serving, NOT scaled to the weight). If you matched a known product, copy its per-100g values exactly.\n"
@@ -590,17 +610,22 @@ function AddActManual({onAdd,onCancel}){const [type,setType]=useState("run");con
 
 function EditPrepSheet({prep,onSave,onClose}){
   const [name,setName]=useState(prep.name);const [tK,setTK]=useState(String(prep.totalKcal));const [tP,setTP]=useState(String(prep.totalProtein));const [tC,setTC]=useState(String(prep.totalCarbs));const [tF,setTF]=useState(String(prep.totalFat));const [portions,setPortions]=useState(String(prep.portions));const [remaining,setRemaining]=useState(String(prep.remaining));const [wt,setWt]=useState(String(prep.totalWeightG||""));
+  // Remaining grams is the source of truth — let the user edit this directly.
+  const [remG,setRemG]=useState(String(Math.round(prep.remainingWeightG??prep.totalWeightG??0)));
   const n=parseInt(portions)||1;const save=()=>{
-    const pts=parseInt(portions)||1,rem=Math.min(parseInt(remaining)||0,pts),w=parseFloat(wt)||0;
+    const pts=parseInt(portions)||1,w=parseFloat(wt)||0;
     const k=parseFloat(tK)||0,p=parseFloat(tP)||0,cv=parseFloat(tC)||0,fat=parseFloat(tF)||0;
     const per100k=w>0?Math.round(k/w*100):0,per100p=w>0?Math.round(p/w*100*10)/10:0,per100c=w>0?Math.round(cv/w*100*10)/10:0,per100f=w>0?Math.round(fat/w*100*10)/10:0;
-    const remG=w>0?Math.round(w*(rem/pts)):0;
-    onSave({...prep,name,totalKcal:k,totalProtein:p,totalCarbs:cv,totalFat:fat,portions:pts,remaining:rem,totalWeightG:w,
-      remainingWeightG:remG,targetPortions:pts,suggestedG:w?Math.round(w/pts):0,
+    // Grams remaining is the truth; portions remaining is derived from it
+    const remGNum=Math.max(0,Math.min(parseFloat(remG)||0,w));
+    const portionG=w>0?w/pts:0;
+    const remPortions=portionG>0?Math.max(0,Math.min(Math.round(remGNum/portionG),pts)):pts;
+    onSave({...prep,name,totalKcal:k,totalProtein:p,totalCarbs:cv,totalFat:fat,portions:pts,remaining:remPortions,totalWeightG:w,
+      remainingWeightG:remGNum,targetPortions:pts,suggestedG:w?Math.round(w/pts):0,
       per100Kcal:per100k,per100Protein:per100p,per100Carbs:per100c,per100Fat:per100f,
       portionWeightG:w?Math.round(w/pts):0,perKcal:Math.round(k/pts),perProtein:Math.round(p/pts),perCarbs:Math.round(cv/pts),perFat:Math.round(fat/pts)});
   };
-  return(<Sheet onClose={onClose} title="Edit Prep"><div style={{display:"flex",flexDirection:"column",gap:9}}><Field label="Name" value={name} onChange={setName}/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}><Field label="Total Kcal" value={tK} onChange={setTK} type="number"/><Field label="Total Protein g" value={tP} onChange={setTP} type="number"/><Field label="Total Carbs g" value={tC} onChange={setTC} type="number"/><Field label="Total Fat g" value={tF} onChange={setTF} type="number"/><Field label="Total weight g" value={wt} onChange={setWt} type="number"/><Field label="Total portions" value={portions} onChange={setPortions} type="number"/></div><Field label="Portions remaining" value={remaining} onChange={setRemaining} type="number"/>{parseFloat(tK)>0&&n>0&&(<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px"}}><div style={{fontSize:11,color:C.muted,marginBottom:4}}>Per portion ({n})</div><div style={{display:"flex",gap:10}}><Chip val={(parseFloat(tK)||0)/n} label="kcal" color={C.lime}/><Chip val={(parseFloat(tP)||0)/n} label="P" color={C.blue}/><Chip val={(parseFloat(tC)||0)/n} label="C" color={C.orange}/><Chip val={(parseFloat(tF)||0)/n} label="F" color={C.purple}/></div></div>)}<div style={{display:"flex",gap:8,marginTop:4}}><button onClick={onClose} style={{flex:1,padding:"11px 0",borderRadius:10,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer"}}>Cancel</button><button onClick={save} style={{flex:2,padding:"11px 0",borderRadius:10,background:C.lime,color:"#000",fontWeight:700,border:"none",cursor:"pointer",fontSize:15}}>Save</button></div></div></Sheet>);
+  return(<Sheet onClose={onClose} title="Edit Prep"><div style={{display:"flex",flexDirection:"column",gap:9}}><Field label="Name" value={name} onChange={setName}/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}><Field label="Total Kcal" value={tK} onChange={setTK} type="number"/><Field label="Total Protein g" value={tP} onChange={setTP} type="number"/><Field label="Total Carbs g" value={tC} onChange={setTC} type="number"/><Field label="Total Fat g" value={tF} onChange={setTF} type="number"/><Field label="Total weight g" value={wt} onChange={setWt} type="number"/><Field label="Total portions" value={portions} onChange={setPortions} type="number"/></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}><Field label="Grams remaining" value={remG} onChange={setRemG} type="number" placeholder="0"/><Field label="Portions remaining" value={remaining} onChange={v=>{setRemaining(v);const pts=parseInt(portions)||1;const w=parseFloat(wt)||0;const r=parseInt(v)||0;if(w>0&&pts>0)setRemG(String(Math.round(w*(r/pts))));}} type="number"/></div><div style={{fontSize:10,color:C.muted,marginTop:-3,fontStyle:"italic"}}>💡 Grams is the source of truth. Editing portions auto-updates grams.</div>{parseFloat(tK)>0&&n>0&&(<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px"}}><div style={{fontSize:11,color:C.muted,marginBottom:4}}>Per portion ({n})</div><div style={{display:"flex",gap:10}}><Chip val={(parseFloat(tK)||0)/n} label="kcal" color={C.lime}/><Chip val={(parseFloat(tP)||0)/n} label="P" color={C.blue}/><Chip val={(parseFloat(tC)||0)/n} label="C" color={C.orange}/><Chip val={(parseFloat(tF)||0)/n} label="F" color={C.purple}/></div></div>)}<div style={{display:"flex",gap:8,marginTop:4}}><button onClick={onClose} style={{flex:1,padding:"11px 0",borderRadius:10,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer"}}>Cancel</button><button onClick={save} style={{flex:2,padding:"11px 0",borderRadius:10,background:C.lime,color:"#000",fontWeight:700,border:"none",cursor:"pointer",fontSize:15}}>Save</button></div></div></Sheet>);
 }
 
 
