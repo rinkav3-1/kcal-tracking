@@ -72,10 +72,11 @@ const GOALS = [
 ];
 const GOAL_DEFICIT = {cut_mild:-250, cut:-400, cut_aggr:-600, maintain:0, bulk_lean:200, bulk:300, bulk_aggr:500};
 const ACT_LEVELS = [
-  { id:"sedentary", label:"Sedentary",         desc:"Desk job, mostly sitting",      m:1.2  },
-  { id:"light",     label:"Lightly active",    desc:"Some walking, ~5-8k steps",     m:1.35 },
-  { id:"moderate",  label:"Moderately active", desc:"Active lifestyle, 8-12k steps", m:1.45 },
-  { id:"active",    label:"Very active",       desc:"Physically demanding work",     m:1.6  },
+  { id:"sedentary", label:"Sedentary",         desc:"Desk job, minimal movement (~0-2k steps)",  m:1.2  },
+  { id:"desk",      label:"Desk + some walking",desc:"Sitting most of day, some walking (2-4k)",  m:1.25 },
+  { id:"light",     label:"Lightly active",    desc:"Regular walking, ~5-8k steps/day",           m:1.35 },
+  { id:"moderate",  label:"Moderately active", desc:"Active lifestyle, 8-12k steps",              m:1.45 },
+  { id:"active",    label:"Very active",       desc:"Physically demanding work or sport",         m:1.6  },
 ];
 const PRESETS = [
   // Dairy / Curd / Yogurt
@@ -169,10 +170,21 @@ function dayBurnTotal(dayType, extraBurn, hasLoggedActivity) {
   // This prevents the bug where logging only a short walk on a "Gym day" drops the target.
   return Math.max(logged, planned);
 }
-function getDT(profile,dayType,weight,extraBurn=0,hasLoggedActivity=false){
+// Steps burn: ~0.04 kcal/kg/step (standard pedometer formula).
+// We only credit steps that go *above* what the base activity level already implies.
+// Sedentary ≈ 2k steps, desk ≈ 3k, light ≈ 6.5k, moderate ≈ 10k — so we credit
+// the delta above the implied baseline, at ~0.04 kcal/kg/step.
+const STEP_BASELINE = { sedentary:2000, desk:3000, light:6500, moderate:10000, active:12000 };
+function stepsKcal(steps, activityLevel, weight) {
+  const baseline = STEP_BASELINE[activityLevel] ?? 2000;
+  const extra = Math.max(0, (steps||0) - baseline);
+  return Math.round(extra * 0.04 * (weight||70));
+}
+function getDT(profile,dayType,weight,extraBurn=0,hasLoggedActivity=false,dailySteps=0){
   const tdee=getTDEE(profile,weight);if(!tdee)return FB[dayType]||FB.rest;
   const burn = dayBurnTotal(dayType, extraBurn, hasLoggedActivity);
-  const base=tdee+burn;
+  const stepBonus = stepsKcal(dailySteps, profile.activityLevel||"sedentary", weight);
+  const base=tdee+burn+stepBonus;
   const adj=GOAL_DEFICIT[profile.goalSubmode||profile.goal||"cut"]??GOAL_DEFICIT[profile.goal||"cut"]??-400;
   const kcal=Math.max(1200,Math.round(base+adj));
   const pPerKg={cut:2.2,bulk:1.8,maintain:2.0}[profile.goal||"cut"];
@@ -181,9 +193,10 @@ function getDT(profile,dayType,weight,extraBurn=0,hasLoggedActivity=false){
   const carbs=Math.max(50,Math.round((kcal-protein*4-fat*9)/4));
   return{kcal,protein,carbs,fat};
 }
-function getMaint(profile,dayType,weight,extraBurn=0,hasLoggedActivity=false){
+function getMaint(profile,dayType,weight,extraBurn=0,hasLoggedActivity=false,dailySteps=0){
   const tdee=getTDEE(profile,weight);if(!tdee)return null;
-  return Math.round(tdee + dayBurnTotal(dayType, extraBurn, hasLoggedActivity));
+  const stepBonus = stepsKcal(dailySteps, profile.activityLevel||"sedentary", weight);
+  return Math.round(tdee + dayBurnTotal(dayType, extraBurn, hasLoggedActivity) + stepBonus);
 }
 // Trend over the last ~21 days (or up to 14 entries if you weigh more often).
 // Requires at least 4 entries spanning at least 3 days. Returns kg/week (negative = losing).
@@ -631,27 +644,37 @@ function MacroFields({form,setForm}){
 }
 // ── Inline edit components ────────────────────────────────────────────────────
 function EditMealInline({meal,onSave,onCancel,products,apiKey}){
-  // If meal has an ingredients array, edit per-ingredient via the same panel used at log time
   const [ings,setIngs]=useState(meal.ingredients||null);
   const [form,setForm]=useState({name:meal.name,kcal:String(meal.kcal),protein:String(meal.protein),carbs:String(meal.carbs),fat:String(meal.fat),notes:meal.notes||""});
   const [ingMode,setIngMode]=useState(!!meal.ingredients?.length);
+  const [mealType,setMealType]=useState(meal.mealType||"snack");
+  const typeRow=(<div style={{display:"flex",gap:4,marginBottom:8}}>
+    {[["🌅","breakfast","Breakfast"],["☀️","lunch","Lunch"],["🌙","dinner","Dinner"],["🍎","snack","Snack"],["🥤","drink","Drink"]].map(([ic,id,lbl])=>{
+      const a=mealType===id;
+      return(<button key={id} onClick={()=>setMealType(id)} style={{flex:1,padding:"5px 2px",borderRadius:7,border:`1px solid ${a?C.lime:C.border}`,background:a?`${C.lime}18`:C.bg,color:a?C.lime:C.muted,cursor:"pointer",fontSize:8.5,textAlign:"center",lineHeight:1.4}}>
+        <div style={{fontSize:11}}>{ic}</div><div>{lbl}</div>
+      </button>);
+    })}
+  </div>);
   if(ingMode&&ings){
     return(<div style={{background:C.faint,borderRadius:10,padding:"12px"}}>
       <div style={{fontSize:11,color:C.muted,marginBottom:6}}>Editing meal · adjust per-ingredient</div>
+      {typeRow}
       <input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} placeholder="Meal name" style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,outline:"none",marginBottom:10,fontWeight:600}}/>
       <IngredientConfirmPanel ingredients={ings} setIngredients={setIngs} products={products||[]} apiKey={apiKey} confirmLabel="Save Changes" onSkip={onCancel} onConfirm={(updated,totals)=>{
         const summary=updated.filter(i=>parseFloat(i.weightG)>0).map(i=>i.name+" "+i.weightG+"g").join(", ");
-        onSave({...meal,name:form.name||meal.name,ingredients:updated,kcal:Math.round(totals.kcal),protein:Math.round(totals.protein*10)/10,carbs:Math.round(totals.carbs*10)/10,fat:Math.round(totals.fat*10)/10,notes:summary});
+        onSave({...meal,mealType,name:form.name||meal.name,ingredients:updated,kcal:Math.round(totals.kcal),protein:Math.round(totals.protein*10)/10,carbs:Math.round(totals.carbs*10)/10,fat:Math.round(totals.fat*10)/10,notes:summary});
       }}/>
       <button onClick={()=>setIngMode(false)} style={{width:"100%",marginTop:8,padding:"7px 0",borderRadius:6,background:"none",border:`1px dashed ${C.border}`,color:C.muted,fontSize:11,cursor:"pointer"}}>Edit totals only instead →</button>
     </div>);
   }
   return(<div style={{background:C.faint,borderRadius:10,padding:"12px 12px 10px"}}>
+    {typeRow}
     {meal.ingredients?.length>0&&<button onClick={()=>setIngMode(true)} style={{width:"100%",marginBottom:8,padding:"7px 0",borderRadius:6,background:C.lime+"15",border:`1px solid ${C.lime}40`,color:C.lime,fontSize:11,fontWeight:600,cursor:"pointer"}}>← Edit per-ingredient</button>}
     <MacroFields form={form} setForm={setForm}/>
     <div style={{display:"flex",gap:7,marginTop:10}}>
       <button onClick={onCancel} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer",fontSize:12}}>Cancel</button>
-      <button onClick={()=>onSave({...meal,name:form.name,kcal:parseFloat(form.kcal)||0,protein:parseFloat(form.protein)||0,carbs:parseFloat(form.carbs)||0,fat:parseFloat(form.fat)||0,notes:form.notes})} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>Save</button>
+      <button onClick={()=>onSave({...meal,mealType,name:form.name,kcal:parseFloat(form.kcal)||0,protein:parseFloat(form.protein)||0,carbs:parseFloat(form.carbs)||0,fat:parseFloat(form.fat)||0,notes:form.notes})} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>Save</button>
     </div>
   </div>);
 }
@@ -1096,6 +1119,8 @@ function AddIngredientRow({onAdd,products}) {
 // ── PrepEatPanel — gram-based, multi-prep combine ─────────────────────────────
 function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose,products,apiKey}) {
   const [selected,setSelected]=useState({}); // {prepId: gramsString}
+  // portionMode tracks whether each selected prep is in "g" or "portions" input mode
+  const [portionMode,setPortionMode]=useState({}); // {prepId: "g"|"portions"}
   // extras: array of {id, source: "label"|"manual", name, weightG, kcal, p, c, f, _per100?}
   const [extras,setExtras]=useState([]);
   const [extrasMode,setExtrasMode]=useState(null); // null | "pick" | "manual" | "photo"
@@ -1122,11 +1147,30 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose,products,
   const toggle=id=>{
     setLogErr("");
     setSelected(p=>{
-      if(p[id]!==undefined){const n={...p};delete n[id];return n;}
+      if(p[id]!==undefined){
+        const n={...p};delete n[id];
+        // Also clear portionMode for this prep
+        setPortionMode(pm=>{const nm={...pm};delete nm[id];return nm;});
+        return n;
+      }
       const prep=activePreps.find(x=>x.id===id);
-      const suggested=prep.suggestedG||prep.portionWeightG||Math.round((prep.remainingWeightG||prep.totalWeightG||0)/Math.max(prep.targetPortions||prep.portions||1,1));
+      const remGrams=prep.remainingWeightG??prep.totalWeightG??0;
+      const remPortions=Math.max(prep.remaining||1,1);
+      const suggested=Math.round(remGrams/remPortions);
       return{...p,[id]:String(suggested)};
     });
+  };
+
+  // Convert portions input → grams for macros calculation
+  const gramsForSelected=(prep,val,mode)=>{
+    if(mode==="portions"){
+      const portions=parseFloat(val)||0;
+      const remGrams=prep.remainingWeightG??prep.totalWeightG??0;
+      const remPortions=Math.max(prep.remaining||1,1);
+      const gramsPerPortion=remPortions>0?remGrams/remPortions:0;
+      return Math.round(portions*gramsPerPortion);
+    }
+    return parseFloat(val)||0;
   };
 
   const macrosForPrep=(prep,grams)=>{
@@ -1142,10 +1186,9 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose,products,
     return{kcal:Math.round((prep.totalKcal||0)*ratio),protein:Math.round((prep.totalProtein||0)*ratio*10)/10,carbs:Math.round((prep.totalCarbs||0)*ratio*10)/10,fat:Math.round((prep.totalFat||0)*ratio*10)/10};
   };
 
-  const totals=Object.entries(selected).reduce((acc,[id,g])=>{
-    // id from Object.entries is always a string; prep.id is a number (Date.now()).
-    // Use loose comparison or coerce so the find succeeds.
+  const totals=Object.entries(selected).reduce((acc,[id,val])=>{
     const prep=activePreps.find(x=>String(x.id)===id);if(!prep)return acc;
+    const g=gramsForSelected(prep,val,portionMode[id]||"g");
     const m=macrosForPrep(prep,g);
     return{kcal:acc.kcal+m.kcal,protein:acc.protein+m.protein,carbs:acc.carbs+m.carbs,fat:acc.fat+m.fat};
   },{kcal:0,protein:0,carbs:0,fat:0});
@@ -1154,15 +1197,16 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose,products,
 
   const confirm=()=>{
     if(!Object.keys(selected).length&&extras.length===0)return;
-    // Refuse to log a meal where everything is zero — that's the bug from screenshot 2
     if(grandTotals.kcal === 0 && grandTotals.protein === 0 && grandTotals.carbs === 0 && grandTotals.fat === 0){
       setLogErr("All macros are zero. The selected prep(s) appear to have no macro data — edit them in the Food tab first.");
       return;
     }
-    const names=Object.entries(selected).map(([id,g])=>{
+    const names=Object.entries(selected).map(([id,val])=>{
       const prep=activePreps.find(x=>String(x.id)===id);
+      const g=gramsForSelected(prep,val,portionMode[id]||"g");
       const safeName = (prep?.name && prep.name.trim()) || "Meal Prep";
-      return prep?`${safeName} ${g}g`:"";
+      const mode=portionMode[id]||"g";
+      return prep?(mode==="portions"?`${safeName} ${val}pc (${g}g)`:`${safeName} ${g}g`):"";
     }).filter(Boolean);
     extras.forEach(e=>{ if(e.name) names.push(e.name + (e.weightG?" "+e.weightG+"g":"")); });
     const label=names.join(" + ") || (extras.length>0?"Snack from labels":"Meal Prep");
@@ -1171,7 +1215,7 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose,products,
     // Update remaining grams for each prep
     setMealPreps(ps=>ps.map(p=>{
       if(selected[p.id]===undefined)return p;
-      const used=parseFloat(selected[p.id])||0;
+      const used=gramsForSelected(p,selected[p.id],portionMode[p.id]||"g");
       const remG=Math.max(0,(p.remainingWeightG??p.totalWeightG??0)-used);
       const totalG=p.totalWeightG||0;
       const newRemPct=totalG>0?remG/totalG:0;
@@ -1192,7 +1236,7 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose,products,
         const remG=prep.remainingWeightG??prep.totalWeightG??0;
         const totalG=prep.totalWeightG||0;
         const pct=totalG>0?Math.round(remG/totalG*100):0;
-        const suggested=prep.suggestedG||prep.portionWeightG||Math.round(remG/Math.max(prep.targetPortions||prep.portions||1,1));
+        const suggested=Math.round(remG/Math.max(prep.remaining||1,1));
         const preview=isSelected?macrosForPrep(prep,selected[prep.id]):{};
         const safeName = (prep.name && prep.name.trim()) || "(unnamed prep)";
         const borderCol = broken ? C.red+"55" : (isSelected?C.lime:C.border);
@@ -1216,10 +1260,35 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose,products,
             </div>}
           </div>
           {isSelected&&!broken&&(<div style={{marginTop:8}} onClick={e=>e.stopPropagation()}>
+            {/* g / portions toggle */}
+            <div style={{display:"flex",gap:4,marginBottom:6}}>
+              {[["g","Grams"],["portions","Portions"]].map(([mode,lbl])=>{
+                const act=(portionMode[prep.id]||"g")===mode;
+                return(<button key={mode} onClick={()=>{
+                  setPortionMode(pm=>({...pm,[prep.id]:mode}));
+                  // Reset input to sensible default for the new mode
+                  if(mode==="portions"){
+                    setSelected(p=>({...p,[prep.id]:"1"}));
+                  } else {
+                    const remGrams=prep.remainingWeightG??prep.totalWeightG??0;
+                    const remP=Math.max(prep.remaining||1,1);
+                    setSelected(p=>({...p,[prep.id]:String(Math.round(remGrams/remP))}));
+                  }
+                }} style={{flex:1,padding:"4px 0",borderRadius:6,border:`1px solid ${act?C.lime:C.border}`,background:act?`${C.lime}18`:C.bg,color:act?C.lime:C.muted,fontWeight:act?700:400,cursor:"pointer",fontSize:10}}>{lbl}</button>);
+              })}
+            </div>
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
-              <input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={selected[prep.id]} onChange={e=>setSelected(p=>({...p,[prep.id]:e.target.value}))} placeholder={String(suggested)} style={{width:70,background:C.bg,border:`1px solid ${C.lime}`,borderRadius:6,padding:"6px 8px",color:C.lime,fontSize:14,fontFamily:"monospace",outline:"none",fontWeight:700}}/>
-              <span style={{fontSize:12,color:C.muted}}>g</span>
-              {parseFloat(selected[prep.id])>0&&<div style={{display:"flex",gap:8}}><Chip val={preview.kcal||0} label="kcal" color={C.lime}/><Chip val={preview.protein||0} label="P" color={C.blue}/></div>}
+              <input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*"
+                value={selected[prep.id]}
+                onChange={e=>setSelected(p=>({...p,[prep.id]:e.target.value}))}
+                placeholder={(portionMode[prep.id]||"g")==="portions"?"1":String(suggested)}
+                style={{width:70,background:C.bg,border:`1px solid ${C.lime}`,borderRadius:6,padding:"6px 8px",color:C.lime,fontSize:14,fontFamily:"monospace",outline:"none",fontWeight:700}}/>
+              <span style={{fontSize:12,color:C.muted}}>
+                {(portionMode[prep.id]||"g")==="portions"
+                  ? `pc · ${gramsForSelected(prep,selected[prep.id],"portions")}g`
+                  : "g"}
+              </span>
+              {(()=>{const g=gramsForSelected(prep,selected[prep.id],portionMode[prep.id]||"g");const pv=g>0?macrosForPrep(prep,g):{};return g>0&&(<div style={{display:"flex",gap:8}}><Chip val={pv.kcal||0} label="kcal" color={C.lime}/><Chip val={pv.protein||0} label="P" color={C.blue}/><Chip val={pv.carbs||0} label="C" color={C.orange}/><Chip val={pv.fat||0} label="F" color={C.purple}/></div>);})()}
             </div>
           </div>)}
         </div>);
@@ -1501,6 +1570,10 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
               const summary=ings.filter(i=>parseFloat(i.weightG)>0).map(i=>i.name+" "+i.weightG+"g").join(", ");
               const tg=ings.reduce((s,i)=>s+(parseFloat(i.weightG)||0),0);
               setForm(f=>({...f,kcal:String(Math.round(totals.kcal)),protein:String(Math.round(totals.protein*10)/10),carbs:String(Math.round(totals.carbs*10)/10),fat:String(Math.round(totals.fat*10)/10),notes:summary}));
+              // CRITICAL: keep per100 consistent with the kcal value just written.
+              // Without this, "kcal/100g" in the gram-adjust header drifts from the form.kcal
+              // (e.g. AI's meal-level kcal=196 sets per100.kcal=356, but ingredient-level
+              // totals say kcal=108 — same item, two values).
               if(tg>0){setPer100({kcal:Math.round(totals.kcal/tg*100),p:Math.round(totals.protein/tg*100*10)/10,c:Math.round(totals.carbs/tg*100*10)/10,f:Math.round(totals.fat/tg*100*10)/10,grams:tg});setGramsEaten(String(Math.round(tg)));}
               setIngConfirmed(true);
             }}/>)
@@ -1554,18 +1627,16 @@ function CreatePrepSheet({products,onSave,onClose,apiKey}){
   const f=k=>v=>setForm(p=>({...p,[k]:v}));
   const analyze=async()=>{setLoading(true);setErr(null);setSaveErr("");setIngConfirmed(false);try{
     const res=await aPrep(imgs,products,desc,apiKey);
-    // Detect empty AI response (totals all zero AND no ingredients) — surface a helpful error
     const totalsAllZero=!res.totalKcal&&!res.totalProtein&&!res.totalCarbs&&!res.totalFat;
     const noIngredients=!res.ingredients||res.ingredients.length===0;
     if(totalsAllZero&&noIngredients){
-      setErr("AI couldn't read these photos. Try clearer scale shots, fewer photos, or use 'Enter manually' below.");
+      setErr("AI couldn't estimate macros from the description/photos. Try more detail in the description (e.g. \"400g cooked chicken breast\"), or use 'Enter manually' below.");
       setLoading(false);
       return;
     }
     setResult(res);
     setForm({kcal:String(Math.round(res.totalKcal)||""),protein:String(Math.round(res.totalProtein)||""),carbs:String(Math.round(res.totalCarbs)||""),fat:String(Math.round(res.totalFat)||"")});
     if(res.estimatedWeightG&&!wt)setWt(String(res.estimatedWeightG));
-    // Show ingredient confirmation if we got a breakdown
     if(res.ingredients&&res.ingredients.length>0){
       setPrepIngredients(res.ingredients.map(ing=>({...ing,weightG:String(ing.weightG||0)})));
     }
@@ -1575,45 +1646,45 @@ function CreatePrepSheet({products,onSave,onClose,apiKey}){
     const k=parseFloat(form.kcal)||0,p=parseFloat(form.protein)||0,carb=parseFloat(form.carbs)||0,fat=parseFloat(form.fat)||0;
     const n=parseInt(portions)||1;
     let w=parseFloat(wt)||0;
-    // Block silent zero-saves (the bug from the screenshot)
     if(k===0&&p===0&&carb===0&&fat===0){
-      setSaveErr("All macros are zero — analyze photos or fill in totals first.");
+      setSaveErr("All macros are zero — analyze or fill in totals first.");
       return;
     }
-    // Cooked weight is OPTIONAL. If not provided, fall back to sum of raw ingredient weights
-    // (already populated into wt by ingredient-confirm flow). If we still have no weight at all,
-    // estimate from kcal as a last resort so save isn't blocked.
-    if(w<=0){
-      // Last-resort estimate: average prepared meal density is ~1.3 kcal/g, so w ≈ kcal/1.3
-      w = Math.max(50, Math.round(k / 1.3));
-    }
+    if(w<=0){w = Math.max(50, Math.round(k / 1.3));}
     setSaveErr("");
-    // Always have a non-empty name — fall back to first words of description, then "Meal Prep"
     const finalName = (name && name.trim()) || (desc.trim().split(/[,.]/)[0].trim().slice(0,40)) || "Meal Prep";
     const per100k=Math.round(k/w*100),per100p=Math.round(p/w*100*10)/10,per100c=Math.round(carb/w*100*10)/10,per100f=Math.round(fat/w*100*10)/10;
     const suggestedG=Math.round(w/n);
     onSave({id:Date.now(),name:finalName,totalKcal:k,totalProtein:p,totalCarbs:carb,totalFat:fat,
       totalWeightG:w,remainingWeightG:w,targetPortions:n,
       per100Kcal:per100k,per100Protein:per100p,per100Carbs:per100c,per100Fat:per100f,
-      suggestedG,
-      // legacy fields for backward compat
-      portions:n,remaining:n,portionWeightG:suggestedG,
+      suggestedG,portions:n,remaining:n,portionWeightG:suggestedG,
       perKcal:Math.round(k/n),perProtein:Math.round(p/n),perCarbs:Math.round(carb/n),perFat:Math.round(fat/n),
       createdDate:TODAY(),notes:result?.notes||""});
   };
   const totalsZero=!parseFloat(form.kcal)&&!parseFloat(form.protein)&&!parseFloat(form.carbs)&&!parseFloat(form.fat);
-  // Render decision: panel vs form
   const showPanel = prepIngredients && !ingConfirmed;
   const showForm  = result && (ingConfirmed || !prepIngredients);
   return(<Sheet onClose={onClose} title="Create Meal Prep">
     <Field label="Prep Name" value={name} onChange={setName} placeholder="e.g. Chicken rice bowl"/>
-    <div style={{marginTop:12}}><ImgZone imgs={imgs} setImgs={setImgs} maxPhotos={10}/></div>
-    <div style={{marginTop:10}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:4}}>Description (optional but helps)</div><textarea value={desc} onChange={e=>setDesc(e.target.value)} rows={2} placeholder="e.g. 500g chicken, 200g dry rice, peas, soy sauce" style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 11px",color:C.text,fontSize:13,outline:"none",resize:"none",fontFamily:"inherit"}}/></div>
 
-    {/* Prominent analyze button — appears as soon as photos are uploaded, before result */}
-    {imgs.length>0&&!result&&!showPanel&&!buildMode&&<button onClick={analyze} disabled={loading} style={{width:"100%",padding:"14px 0",borderRadius:10,background:loading?C.faint:C.lime,color:"#000",fontWeight:800,border:"none",cursor:loading?"default":"pointer",fontSize:15,marginTop:12,boxShadow:loading?"none":`0 0 12px ${C.lime}40`}}>{loading?"Analyzing — this can take 20-30s with many photos…":`🔍 Analyze ${imgs.length} photo${imgs.length!==1?"s":""}`}</button>}
-    {/* Build-from-labels button — alternative to photos, always available when no result yet */}
-    {!result&&!showPanel&&!buildMode&&<button onClick={()=>{setBuildMode("labels");setLabelIngs([]);setPickedProd(null);setPickSearch("");}} style={{width:"100%",padding:"10px 0",borderRadius:10,background:"none",border:`1px dashed ${C.border}`,color:C.muted,cursor:"pointer",fontSize:12,marginTop:8}}>🏷️ Build from labels manually</button>}
+    {/* Total cooked weight — shown upfront, before analysis */}
+    <div style={{marginTop:10,display:"flex",gap:9,alignItems:"flex-end"}}>
+      <div style={{flex:1}}><Field label="Total cooked weight g (optional)" value={wt} onChange={setWt} type="number" placeholder="e.g. 800"/></div>
+      <div style={{flex:1}}><Field label="Portions" value={portions} onChange={setPortions} type="number" placeholder="4"/></div>
+    </div>
+    <div style={{fontSize:10,color:C.muted,marginTop:4,marginBottom:8,lineHeight:1.4}}>💡 Weigh the finished container now, before eating. Drives the portion-size suggestion. Macros are independent.</div>
+
+    {/* Photos — optional now */}
+    <div style={{marginBottom:4,fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}>Photos (optional — AI can estimate from description alone)</div>
+    <ImgZone imgs={imgs} setImgs={setImgs} maxPhotos={10}/>
+
+    {/* Description */}
+    <div style={{marginTop:10}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:4}}>Description <span style={{textTransform:"none",color:C.lime}}>← describe ingredients + weights for accurate AI estimate</span></div><textarea value={desc} onChange={e=>setDesc(e.target.value)} rows={3} placeholder={"e.g. 400g cooked chicken breast\nor: 500g raw chicken, 200g dry rice, 80g peas, 30ml soy sauce\nor: homemade cheesecake, 200g cream cheese, 150g biscuits, 50g butter"} style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 11px",color:C.text,fontSize:13,outline:"none",resize:"none",fontFamily:"inherit"}}/></div>
+
+    {/* Analyze — works with or without photos */}
+    {!result&&!showPanel&&!buildMode&&<button onClick={analyze} disabled={loading||(!imgs.length&&!desc.trim())} style={{width:"100%",padding:"14px 0",borderRadius:10,background:loading?C.faint:(imgs.length||desc.trim())?C.lime:C.faint,color:"#000",fontWeight:800,border:"none",cursor:(loading||(!imgs.length&&!desc.trim()))?"default":"pointer",fontSize:15,marginTop:10,boxShadow:(!loading&&(imgs.length||desc.trim()))?`0 0 12px ${C.lime}40`:"none"}}>{loading?"Analyzing…":imgs.length?`🔍 Analyze ${imgs.length} photo${imgs.length!==1?"s":""}${desc.trim()?" + description":""}`:desc.trim()?"🔍 Estimate from description":"Add photos or a description first"}</button>}
+    {!result&&!showPanel&&!buildMode&&<button onClick={()=>{setBuildMode("labels");setLabelIngs([]);setPickedProd(null);setPickSearch("");}} style={{width:"100%",padding:"10px 0",borderRadius:10,background:"none",border:`1px dashed ${C.border}`,color:C.muted,cursor:"pointer",fontSize:12,marginTop:8}}>🏷️ Build from product labels manually</button>}
     {err&&<div style={{background:"#1e0a0a",border:"1px solid #5a1a1a",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#ff8080",margin:"10px 0",wordBreak:"break-word"}}>{err}</div>}
 
     {/* Label builder UI */}
@@ -1623,7 +1694,6 @@ function CreatePrepSheet({products,onSave,onClose,apiKey}){
         <button onClick={()=>{setBuildMode(null);setLabelIngs([]);setPickedProd(null);}} style={{fontSize:11,color:C.muted,background:"none",border:"none",cursor:"pointer"}}>✕</button>
       </div>
       <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Pick each ingredient from your label database and enter raw/dry weight. We'll combine them into a meal prep.</div>
-      {/* Already-added ingredients */}
       {labelIngs.length>0&&<div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:10}}>
         {labelIngs.map((ing,i)=>(<div key={ing.id} style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"7px 10px",display:"flex",alignItems:"center",gap:8}}>
           <div style={{flex:1,minWidth:0}}>
@@ -1633,7 +1703,6 @@ function CreatePrepSheet({products,onSave,onClose,apiKey}){
           <button onClick={()=>setLabelIngs(p=>p.filter((_,j)=>j!==i))} style={{background:"none",border:"none",color:C.faint,fontSize:14,cursor:"pointer",padding:"0 2px",lineHeight:1}}>×</button>
         </div>))}
       </div>}
-      {/* Picker */}
       {!pickedProd?(<>
         <input value={pickSearch} onChange={e=>setPickSearch(e.target.value)} placeholder="Search labels (chicken, rice, oats…)" style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,outline:"none",marginBottom:7}}/>
         <div style={{display:"flex",flexDirection:"column",gap:5,maxHeight:220,overflowY:"auto"}}>
@@ -1658,9 +1727,7 @@ function CreatePrepSheet({products,onSave,onClose,apiKey}){
           <button onClick={()=>{const g=parseFloat(pickedG)||0;if(g<=0)return;setLabelIngs(p=>[...p,{id:Date.now()+Math.random(),name:pickedProd.name,weightG:g,kcal100:pickedProd.kcal,p100:pickedProd.p,c100:pickedProd.c,f100:pickedProd.f}]);setPickedProd(null);setPickedG("");setPickSearch("");}} disabled={!parseFloat(pickedG)} style={{flex:2,padding:"7px 0",borderRadius:6,background:parseFloat(pickedG)?C.lime:C.faint,border:"none",color:"#000",fontWeight:700,cursor:parseFloat(pickedG)?"pointer":"default",fontSize:12}}>+ Add</button>
         </div>
       </div>)}
-      {/* Done button */}
       {labelIngs.length>0&&!pickedProd&&<button onClick={()=>{
-        // Convert to the ingredients shape IngredientConfirmPanel expects, then trigger that flow
         const ings=labelIngs.map(ing=>({name:ing.name,weightG:String(ing.weightG),kcal:ing.kcal100,protein:ing.p100,carbs:ing.c100,fat:ing.f100}));
         const totalK=labelIngs.reduce((s,i)=>s+i.kcal100*i.weightG/100,0);
         const totalP=labelIngs.reduce((s,i)=>s+i.p100*i.weightG/100,0);
@@ -1676,9 +1743,8 @@ function CreatePrepSheet({products,onSave,onClose,apiKey}){
     </div>}
 
     {showPanel?(<div style={{marginTop:12}}><IngredientConfirmPanel ingredients={prepIngredients} setIngredients={setPrepIngredients} products={products} apiKey={apiKey} confirmLabel="Use These Weights →" onSkip={()=>setIngConfirmed(true)} onConfirm={(ings,totals)=>{const totalG=ings.reduce((s,i)=>s+(parseFloat(i.weightG)||0),0);setForm({kcal:String(Math.round(totals.kcal)),protein:String(Math.round(totals.protein)),carbs:String(Math.round(totals.carbs)),fat:String(Math.round(totals.fat))});if(!wt&&totalG>0)setWt(String(Math.round(totalG)));setIngConfirmed(true);}}/></div>):!result?(<>
-      {/* Manual fallback — clearly demoted vs analyze */}
-      {imgs.length===0&&<div style={{textAlign:"center",fontSize:11,color:C.muted,marginTop:14,marginBottom:6}}>Upload photos for AI analysis, or skip to manual entry below</div>}
-      <button onClick={()=>setResult(true)} style={{width:"100%",padding:"9px 0",borderRadius:10,background:"none",border:`1px solid ${C.border}`,color:C.muted,fontWeight:500,cursor:"pointer",fontSize:13,marginTop:imgs.length?6:0}}>{imgs.length?"Skip AI · Enter manually":"Enter macros manually"}</button>
+      {(!imgs.length&&!desc.trim())&&<div style={{textAlign:"center",fontSize:11,color:C.muted,marginTop:14,marginBottom:6}}>Add photos or describe what's in the prep to let AI estimate macros, or skip to manual entry</div>}
+      <button onClick={()=>setResult(true)} style={{width:"100%",padding:"9px 0",borderRadius:10,background:"none",border:`1px solid ${C.border}`,color:C.muted,fontWeight:500,cursor:"pointer",fontSize:13,marginTop:(imgs.length||desc.trim())?0:4}}>Enter macros manually</button>
     </>):(<>
       {prepIngredients&&<button onClick={()=>setIngConfirmed(false)} style={{width:"100%",padding:"8px 0",borderRadius:8,background:"none",border:`1px solid ${C.border}`,color:C.muted,fontWeight:500,cursor:"pointer",fontSize:12,marginTop:12,marginBottom:0}}>← Adjust ingredients</button>}
       <div style={{marginTop:12,display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
@@ -1686,12 +1752,9 @@ function CreatePrepSheet({products,onSave,onClose,apiKey}){
         <Field label="Total Protein g" value={form.protein} onChange={f("protein")} type="number" placeholder="0"/>
         <Field label="Total Carbs g" value={form.carbs} onChange={f("carbs")} type="number" placeholder="0"/>
         <Field label="Total Fat g" value={form.fat} onChange={f("fat")} type="number" placeholder="0"/>
-        <Field label="Final cooked weight g (optional)" value={wt} onChange={setWt} type="number" placeholder="auto"/>
-        <Field label="Portions" value={portions} onChange={setPortions} type="number" placeholder="4"/>
       </div>
-      <div style={{fontSize:10,color:C.muted,marginTop:5,lineHeight:1.5}}>💡 Final cooked weight is optional — weigh the finished container if you have it, otherwise we'll use the sum of raw ingredient weights. It only affects portion-size suggestions, not macros.</div>
       {totalsZero&&<div style={{background:"#1a1400",border:`1px solid ${C.yellow}40`,borderRadius:8,padding:"8px 12px",marginTop:8,fontSize:12,color:C.yellow}}>⚠ Macros are all zero — fill them in or re-analyze before saving.</div>}
-      {parseFloat(form.kcal)>0&&portN>0&&(<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px",marginTop:10}}><div style={{fontSize:11,color:C.muted,marginBottom:4}}>Per portion ({portN})</div><div style={{display:"flex",gap:10}}><Chip val={(parseFloat(form.kcal)||0)/portN} label="kcal" color={C.lime}/><Chip val={(parseFloat(form.protein)||0)/portN} label="P" color={C.blue}/><Chip val={(parseFloat(form.carbs)||0)/portN} label="C" color={C.orange}/><Chip val={(parseFloat(form.fat)||0)/portN} label="F" color={C.purple}/></div></div>)}
+      {parseFloat(form.kcal)>0&&portN>0&&(<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px",marginTop:10}}><div style={{fontSize:11,color:C.muted,marginBottom:4}}>Per portion ({portN}) · {wt?Math.round(parseFloat(wt)/portN):"?"}g each</div><div style={{display:"flex",gap:10}}><Chip val={(parseFloat(form.kcal)||0)/portN} label="kcal" color={C.lime}/><Chip val={(parseFloat(form.protein)||0)/portN} label="P" color={C.blue}/><Chip val={(parseFloat(form.carbs)||0)/portN} label="C" color={C.orange}/><Chip val={(parseFloat(form.fat)||0)/portN} label="F" color={C.purple}/></div></div>)}
       {saveErr&&<div style={{background:"#1e0a0a",border:"1px solid #5a1a1a",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#ff8080",marginTop:10,wordBreak:"break-word"}}>{saveErr}</div>}
       <div style={{display:"flex",gap:8,marginTop:14}}>
         <button onClick={onClose} style={{flex:1,padding:"11px 0",borderRadius:10,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer"}}>Cancel</button>
@@ -1707,8 +1770,9 @@ function TodayTab({dayData,setDayData,mealPreps,setMealPreps,products,setProduct
   const [editingMealId,setEditingMealId]=useState(null);
   const extraBurn=(dayData.activities||[]).reduce((s,a)=>s+a.kcal,0)+(dayData.burnedExtra||0);
   const hasLoggedAct=(dayData.activities||[]).length>0||(dayData.burnedExtra||0)>0;
-  const dt=getDT(profile,dayData.dayType,latestWeight,extraBurn,hasLoggedAct);
-  const maint=getMaint(profile,dayData.dayType,latestWeight,extraBurn,hasLoggedAct);
+  const dailySteps=dayData.dailySteps||0;
+  const dt=getDT(profile,dayData.dayType,latestWeight,extraBurn,hasLoggedAct,dailySteps);
+  const maint=getMaint(profile,dayData.dayType,latestWeight,extraBurn,hasLoggedAct,dailySteps);
   const tot=dayData.meals.reduce((a,m)=>({kcal:a.kcal+m.kcal,protein:a.protein+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat}),{kcal:0,protein:0,carbs:0,fat:0});
   const remKcal=dt.kcal-tot.kcal,remProt=dt.protein-tot.protein;
   const profileOK=profile.birthday&&profile.heightCm;const gc=gCol(profile.goal);
@@ -1765,7 +1829,21 @@ function TodayTab({dayData,setDayData,mealPreps,setMealPreps,products,setProduct
       {/* Day type */}
       <div style={{marginBottom:10}}>
         <div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:7}}>Day Type</div>
-        <div style={{display:"flex",gap:5}}>{Object.entries(DAY_TYPES).map(([key,val])=>{const active=dayData.dayType===key;const tKcal=getDT(profile,key,latestWeight,0,false).kcal;return(<button key={key} onClick={()=>setDayData(p=>({...p,dayType:key,goalMode:profile.goal}))} style={{flex:1,padding:"7px 3px",borderRadius:10,border:`1px solid ${active?C.lime:C.border}`,background:active?`${C.lime}18`:C.card,color:active?C.lime:C.muted,fontWeight:active?700:400,cursor:"pointer",fontSize:9.5,lineHeight:1.4,textAlign:"center"}}><div style={{fontSize:14}}>{val.icon}</div><div>{val.label}</div><div style={{fontFamily:"monospace",fontSize:10,opacity:0.75,marginTop:1}}>{tKcal}</div></button>);})}</div>
+        <div style={{display:"flex",gap:5}}>{Object.entries(DAY_TYPES).map(([key,val])=>{const active=dayData.dayType===key;const tKcal=getDT(profile,key,latestWeight,0,false,dailySteps).kcal;return(<button key={key} onClick={()=>setDayData(p=>({...p,dayType:key,goalMode:profile.goal}))} style={{flex:1,padding:"7px 3px",borderRadius:10,border:`1px solid ${active?C.lime:C.border}`,background:active?`${C.lime}18`:C.card,color:active?C.lime:C.muted,fontWeight:active?700:400,cursor:"pointer",fontSize:9.5,lineHeight:1.4,textAlign:"center"}}><div style={{fontSize:14}}>{val.icon}</div><div>{val.label}</div><div style={{fontFamily:"monospace",fontSize:10,opacity:0.75,marginTop:1}}>{tKcal}</div></button>);})}</div>
+      </div>
+
+      {/* Daily steps — optional but recalculates target when set */}
+      <div style={{marginBottom:12,background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+          <span style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}>Daily Steps</span>
+          {dailySteps>0&&stepsKcal(dailySteps,profile.activityLevel||"sedentary",latestWeight||70)>0&&<span style={{fontSize:10,color:C.orange,fontFamily:"monospace"}}>+{stepsKcal(dailySteps,profile.activityLevel||"sedentary",latestWeight||70)} kcal bonus</span>}
+        </div>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          <input type="text" inputMode="numeric" pattern="[0-9]*" value={dailySteps||""} onChange={e=>{const v=parseInt(e.target.value.replace(/\D/g,""))||0;setDayData(p=>({...p,dailySteps:v}));}} placeholder="0" style={{width:90,background:C.bg,border:`1px solid ${C.border}`,borderRadius:7,padding:"7px 10px",color:C.text,fontSize:14,fontFamily:"monospace",fontWeight:700,outline:"none"}}/>
+          <span style={{fontSize:11,color:C.muted}}>steps</span>
+          <div style={{display:"flex",gap:5,marginLeft:"auto"}}>{[2000,5000,8000,10000].map(n=>(<button key={n} onClick={()=>setDayData(p=>({...p,dailySteps:n}))} style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${dailySteps===n?C.orange:C.border}`,background:dailySteps===n?`${C.orange}18`:C.bg,color:dailySteps===n?C.orange:C.muted,cursor:"pointer",fontSize:10,fontFamily:"monospace"}}>{n>=1000?`${n/1000}k`:n}</button>))}</div>
+        </div>
+        {dailySteps>0&&<div style={{fontSize:10,color:C.muted,marginTop:5,lineHeight:1.4}}>Above-baseline steps add to your daily target. Set your base activity level in Settings to calibrate the bonus.</div>}
       </div>
 
       {/* Macro rings */}
@@ -1814,7 +1892,7 @@ function TodayTab({dayData,setDayData,mealPreps,setMealPreps,products,setProduct
               {isExp&&<div style={{padding:"0 14px 12px",borderTop:`1px solid ${C.border}`}}>
                 {m.notes?<div style={{fontSize:11,color:C.muted,lineHeight:1.5,marginTop:9,marginBottom:9,wordBreak:"break-word"}}>{isCanteen?"🍴 ":"📋 "}<span style={{color:C.text}}>{m.notes}</span></div>:<div style={{fontSize:11,color:C.muted,marginTop:9,marginBottom:9,fontStyle:"italic"}}>No ingredient breakdown saved.</div>}
                 <div style={{display:"flex",gap:6,marginTop:6}}>
-                  <button onClick={()=>setEditingMealId(m.id)} style={{flex:1,padding:"7px 0",borderRadius:7,background:C.bg,border:`1px solid ${C.border}`,color:C.text,fontWeight:500,cursor:"pointer",fontSize:12}}>✎ Edit macros</button>
+                  <button onClick={()=>setEditingMealId(m.id)} style={{flex:1,padding:"7px 0",borderRadius:7,background:C.bg,border:`1px solid ${C.border}`,color:C.text,fontWeight:500,cursor:"pointer",fontSize:12}}>✎ Edit</button>
                   <button onClick={()=>deleteMeal(m.id)} style={{padding:"7px 14px",borderRadius:7,background:"none",border:`1px solid ${C.red}40`,color:C.red,fontWeight:500,cursor:"pointer",fontSize:12}}>Delete</button>
                 </div>
               </div>}
@@ -1830,20 +1908,18 @@ function TodayTab({dayData,setDayData,mealPreps,setMealPreps,products,setProduct
 }
 
 // ── Activity Tab ──────────────────────────────────────────────────────────────
-function ActivityTab({dayData,setDayData,profile,weights,setWeights}){
+function ActivityTab({dayData,setDayData,profile,weights,setWeights,weightPhases,setWeightPhases}){
   const [modal,setModal]=useState(false);const [view,setView]=useState("today");const [histDates,setHistDates]=useState([]);const [histLogs,setHistLogs]=useState({});const [histLoaded,setHistLoaded]=useState(false);
   const activities=dayData.activities||[];const totalBurned=activities.reduce((s,a)=>s+a.kcal,0)+(dayData.burnedExtra||0);
   useEffect(()=>{if(view==="history"&&!histLoaded){store.get("fit_dates",[]).then(async ds=>{const e={};for(const d of ds.slice(0,30)){const log=await store.get(`fit_day_${d}`,null);if(log&&(log.activities||[]).length>0)e[d]=log;}setHistLogs(e);setHistDates(Object.keys(e).sort((a,b)=>b.localeCompare(a)));setHistLoaded(true);});}},[view]);
   const addActivity=act=>{setDayData(p=>({...p,activities:[...(p.activities||[]),act]}));setModal(false);};
   const delActivity=id=>{setDayData(p=>({...p,activities:(p.activities||[]).filter(a=>a.id!==id)}));};
   const [wInput,setWInput]=useState("");const [editWIdx,setEditWIdx]=useState(null);const [editWVal,setEditWVal]=useState("");const [wDate,setWDate]=useState(TODAY());const [showAllW,setShowAllW]=useState(false);
-  // Undo for accidental weight delete — 5-second toast
-  const [undoEntry,setUndoEntry]=useState(null); // {entry, timeout}
+  const [undoEntry,setUndoEntry]=useState(null);
   const deleteWeight=(idx)=>{
     const entry = weights[idx];
     if (!entry) return;
     setWeights(p=>p.filter((_,j)=>j!==idx));
-    // Clear any previous undo
     if (undoEntry?.timeout) clearTimeout(undoEntry.timeout);
     const t = setTimeout(()=>setUndoEntry(null), 5000);
     setUndoEntry({entry, timeout: t});
@@ -1856,12 +1932,10 @@ function ActivityTab({dayData,setDayData,profile,weights,setWeights}){
     setUndoEntry(null);
   };
   const latestW=weights[0];
-  // Overall change since first logged weight (oldest entry — last in array since sort is desc).
   const firstW=weights.length>=2?weights[weights.length-1]:null;
   const overallDelta=firstW&&latestW?latestW.weight-firstW.weight:null;
   const logWeight=()=>{const w=parseNum(wInput);if(!w)return;const date=wDate||TODAY();const e={date,weight:w};setWeights(p=>[e,...p.filter(x=>x.date!==date)].sort((a,b)=>b.date.localeCompare(a.date)));setWInput("");setWDate(TODAY());};
   const saveEditW=i=>{const w=parseNum(editWVal);if(!w)return;setWeights(p=>{const n=[...p];n[i]={...n[i],weight:w};return n.sort((a,b)=>b.date.localeCompare(a.date));});setEditWIdx(null);};
-  // Weight chart data
   const wSpark=[...weights].reverse().slice(-20);
   const wVals=wSpark.map(w=>w.weight);
   const wMin=wVals.length?Math.min(...wVals)-0.5:65;const wMax=wVals.length?Math.max(...wVals)+0.5:70;
@@ -1869,6 +1943,70 @@ function ActivityTab({dayData,setDayData,profile,weights,setWeights}){
   const wpx=i=>wSpark.length>1?(i/(wSpark.length-1))*WW:WW/2;
   const wpy=v=>WH-((v-wMin)/(wMax-wMin))*(WH-12)-6;
   const wTrend=weeklyTrend(weights);
+
+  // ── Weight phases ──────────────────────────────────────────────────────────
+  const [showPhases,setShowPhases]=useState(false);
+  const [newPhaseOpen,setNewPhaseOpen]=useState(false);
+  const [newPhaseLabel,setNewPhaseLabel]=useState("");
+  const [newPhaseGoal,setNewPhaseGoal]=useState(profile?.goal||"cut");
+  const activePhase=weightPhases.find(p=>!p.endDate)||null;
+  const closedPhases=weightPhases.filter(p=>!!p.endDate).sort((a,b)=>b.startDate.localeCompare(a.startDate));
+
+  const phaseDuration=(startDate,endDate)=>{
+    const days=Math.round((new Date((endDate||TODAY())+"T12:00:00")-new Date(startDate+"T12:00:00"))/(86400000));
+    if(days<14)return days+"d";
+    if(days<60)return Math.round(days/7)+"wk";
+    return (days/30.44).toFixed(1)+"mo";
+  };
+  const phaseGoalColor=g=>g==="cut"?C.red:g==="bulk"?C.blue:C.lime;
+  const phaseGoalLabel=g=>g==="cut"?"Cut 🔻":g==="bulk"?"Bulk 📈":"Maintain ⚖";
+
+  const startNewPhase=()=>{
+    if(!newPhaseLabel.trim())return;
+    const today=TODAY();
+    const curW=latestW?.weight||null;
+    // Close the currently active phase if there is one
+    setWeightPhases(prev=>{
+      const closed=prev.map(p=>(!p.endDate?{...p,endDate:today,endWeight:curW}:p));
+      const newP={id:Date.now(),label:newPhaseLabel.trim(),goal:newPhaseGoal,startDate:today,startWeight:curW,endDate:null,endWeight:null};
+      return[...closed,newP];
+    });
+    setNewPhaseLabel("");setNewPhaseOpen(false);
+  };
+
+  const deletePhase=id=>setWeightPhases(p=>p.filter(x=>x.id!==id));
+
+  const PhaseCard=({phase})=>{
+    const isCurrent=!phase.endDate;
+    const curW=isCurrent?latestW?.weight:null;
+    const endW=phase.endWeight??curW;
+    const delta=endW!=null&&phase.startWeight!=null?endW-phase.startWeight:null;
+    const dur=phaseDuration(phase.startDate,phase.endDate);
+    const gc=phaseGoalColor(phase.goal);
+    return(<div style={{background:C.bg,border:`1px solid ${isCurrent?gc:C.border}`,borderRadius:10,padding:"10px 14px",marginBottom:6}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+            <span style={{fontSize:13,fontWeight:700,color:isCurrent?gc:C.text}}>{phase.label}</span>
+            <span style={{fontSize:10,background:gc+"20",color:gc,padding:"2px 8px",borderRadius:12,fontWeight:600}}>{phaseGoalLabel(phase.goal)}</span>
+            {isCurrent&&<span style={{fontSize:10,background:C.lime+"20",color:C.lime,padding:"2px 8px",borderRadius:12,fontWeight:600}}>● Active</span>}
+          </div>
+          <div style={{fontSize:11,color:C.muted,marginTop:3}}>
+            {new Date(phase.startDate+"T12:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}
+            {" → "}{isCurrent?"now":new Date(phase.endDate+"T12:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}
+            {" · "}<span style={{fontFamily:"monospace"}}>{dur}</span>
+          </div>
+          <div style={{display:"flex",gap:10,marginTop:5,flexWrap:"wrap"}}>
+            {phase.startWeight!=null&&<div style={{fontFamily:"monospace",fontSize:11,color:C.muted}}>Start: <span style={{color:C.text,fontWeight:700}}>{phase.startWeight.toFixed(2)} kg</span></div>}
+            {endW!=null&&<div style={{fontFamily:"monospace",fontSize:11,color:C.muted}}>{isCurrent?"Now":"End"}: <span style={{color:C.text,fontWeight:700}}>{endW.toFixed(2)} kg</span></div>}
+            {delta!=null&&<div style={{fontFamily:"monospace",fontSize:12,fontWeight:800,color:delta<0?C.lime:C.red}}>{delta<0?"↓":"↑"}{Math.abs(delta).toFixed(2)} kg</div>}
+          </div>
+        </div>
+        <button onClick={()=>deletePhase(phase.id)} style={{background:"none",border:"none",color:C.faint,fontSize:16,cursor:"pointer",padding:"0 2px",flexShrink:0,marginLeft:6}}>×</button>
+      </div>
+    </div>);
+  };
+
   return(<div style={{height:"100%",position:"relative"}}>
     <div style={{height:"100%",overflowY:"auto",padding:"0 16px 90px"}}>
       <div style={{padding:"18px 0 8px"}}><div style={{fontSize:26,fontWeight:800,color:C.text,letterSpacing:"-0.03em"}}>Activity</div></div>
@@ -1879,7 +2017,6 @@ function ActivityTab({dayData,setDayData,profile,weights,setWeights}){
           {latestW&&<div style={{display:"flex",alignItems:"baseline",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}><span style={{fontFamily:"monospace",fontSize:18,fontWeight:800,color:C.lime}}>{latestW.weight.toFixed(2)}</span><span style={{fontSize:12,color:C.muted}}>kg</span>{overallDelta!==null&&<span style={{fontFamily:"monospace",fontSize:11,color:overallDelta<0?C.lime:C.red}} title={"Total change since first log on "+firstW.date}>{overallDelta<0?"↓":"↑"}{Math.abs(overallDelta).toFixed(2)} since start</span>}</div>}
         </div>
         {wSpark.length>=4&&(<svg width={WW} height={WH} style={{display:"block",marginBottom:6,overflow:"visible"}}>
-          {/* Trend line */}
           {wTrend!==null&&wSpark.length>=4&&(()=>{const startV=wSpark[0].weight;const endV=wSpark[wSpark.length-1].weight+(wTrend/7*(wSpark.length-1));return<line x1={0} y1={wpy(startV)} x2={WW} y2={wpy(Math.min(wMax-0.1,Math.max(wMin+0.1,endV)))} stroke={wTrend<0?C.lime+"60":C.red+"60"} strokeWidth={1} strokeDasharray="3 3"/>;})()}
           <polyline points={wSpark.map((d,i)=>wpx(i)+","+wpy(d.weight)).join(" ")} fill="none" stroke={C.lime+"50"} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"/>
           <polyline points={wSpark.map((d,i)=>wpx(i)+","+wpy(d.weight)).join(" ")} fill="none" stroke={C.lime} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
@@ -1900,6 +2037,49 @@ function ActivityTab({dayData,setDayData,profile,weights,setWeights}){
         </div>
         {weights.length>14&&<button onClick={()=>setShowAllW(p=>!p)} style={{width:"100%",marginTop:6,padding:"6px 0",borderRadius:6,background:"none",border:`1px dashed ${C.border}`,color:C.muted,cursor:"pointer",fontSize:11}}>{showAllW?"▴ Show recent only":`▾ Show all ${weights.length} entries`}</button>}
       </div>
+
+      {/* Phase tracker */}
+      <div style={{background:C.card,border:`1px solid ${showPhases?C.blue:C.border}`,borderRadius:12,padding:"10px 14px",marginBottom:12}}>
+        <button onClick={()=>setShowPhases(p=>!p)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",padding:0}}>
+          <div>
+            <span style={{fontSize:11,color:C.blue,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}>Weight Phases</span>
+            {activePhase&&<span style={{fontSize:10,color:C.lime,marginLeft:8}}>● {activePhase.label} active</span>}
+          </div>
+          <span style={{fontSize:11,color:C.muted}}>{showPhases?"▲":"▼"} {weightPhases.length} phase{weightPhases.length!==1?"s":""}</span>
+        </button>
+        {showPhases&&<div style={{marginTop:12}}>
+          {/* Active phase */}
+          {activePhase&&<PhaseCard phase={activePhase}/>}
+          {!activePhase&&<div style={{fontSize:12,color:C.muted,marginBottom:10,fontStyle:"italic"}}>No active phase. Start one below to track progress across goals.</div>}
+
+          {/* Start new phase button / form */}
+          {!newPhaseOpen&&<button onClick={()=>setNewPhaseOpen(true)} style={{width:"100%",padding:"9px 0",borderRadius:8,background:`${C.blue}18`,border:`1px solid ${C.blue}60`,color:C.blue,fontWeight:700,cursor:"pointer",fontSize:13,marginBottom:closedPhases.length>0?10:0}}>
+            {activePhase?"⟳ Start New Phase (closes current)":"＋ Start New Phase"}
+          </button>}
+          {newPhaseOpen&&<div style={{background:C.bg,border:`1px solid ${C.blue}`,borderRadius:10,padding:"12px 14px",marginBottom:10}}>
+            <div style={{fontSize:11,color:C.blue,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>New Phase</div>
+            {activePhase&&<div style={{fontSize:11,color:C.yellow,marginBottom:8,lineHeight:1.4}}>⚠ This will close <b>{activePhase.label}</b> (started {phaseDuration(activePhase.startDate,null)} ago) and begin a fresh tracking period.</div>}
+            <Field label="Phase label" value={newPhaseLabel} onChange={setNewPhaseLabel} placeholder="e.g. Summer Cut, Bulk #2"/>
+            <div style={{display:"flex",gap:5,marginTop:8,marginBottom:10}}>
+              {[["cut","Cut 🔻",C.red],["maintain","Maintain ⚖",C.lime],["bulk","Bulk 📈",C.blue]].map(([id,lbl,col])=>(
+                <button key={id} onClick={()=>setNewPhaseGoal(id)} style={{flex:1,padding:"7px 4px",borderRadius:8,border:`1px solid ${newPhaseGoal===id?col:C.border}`,background:newPhaseGoal===id?col+"20":C.card,color:newPhaseGoal===id?col:C.muted,fontWeight:newPhaseGoal===id?700:400,cursor:"pointer",fontSize:11}}>{lbl}</button>
+              ))}
+            </div>
+            {latestW&&<div style={{fontSize:11,color:C.muted,marginBottom:8}}>Starting weight: <span style={{fontFamily:"monospace",color:C.text,fontWeight:700}}>{latestW.weight.toFixed(2)} kg</span></div>}
+            <div style={{display:"flex",gap:7}}>
+              <button onClick={()=>{setNewPhaseOpen(false);setNewPhaseLabel("");}} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.card,border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:12}}>Cancel</button>
+              <button onClick={startNewPhase} disabled={!newPhaseLabel.trim()} style={{flex:2,padding:"8px 0",borderRadius:8,background:newPhaseLabel.trim()?C.blue:C.faint,border:"none",color:"#000",fontWeight:700,cursor:newPhaseLabel.trim()?"pointer":"default",fontSize:13}}>Start Phase</button>
+            </div>
+          </div>}
+
+          {/* Closed phase history */}
+          {closedPhases.length>0&&<div>
+            <div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>History</div>
+            {closedPhases.map(p=><PhaseCard key={p.id} phase={p}/>)}
+          </div>}
+        </div>}
+      </div>
+
       <div style={{display:"flex",gap:6,marginBottom:14}}>{[["Today","today"],["Past Activity","history"]].map(([lbl,v])=>(<button key={v} onClick={()=>setView(v)} style={{flex:1,padding:"9px 0",borderRadius:10,border:`1px solid ${view===v?C.orange:C.border}`,background:view===v?`${C.orange}20`:C.card,color:view===v?C.orange:C.muted,fontWeight:view===v?700:500,cursor:"pointer",fontSize:12}}>{lbl}</button>))}</div>
       {view==="today"&&(<>{totalBurned>0&&<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"14px 18px",marginBottom:14}}><div style={{fontSize:11,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}>Total burn bonus today</div><div style={{fontSize:40,fontWeight:900,fontFamily:"monospace",color:C.orange,lineHeight:1.1,marginTop:4}}>+{Math.round(totalBurned)}</div><div style={{fontSize:12,color:C.muted,marginTop:2}}>kcal added to daily target</div></div>}<div style={{display:"flex",flexDirection:"column",gap:7}}>{activities.map(a=><div key={a.id} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:22}}>{a.type==="gym"?"🏋️":a.type==="run"?"🏃":"🚶"}</span><div style={{flex:1,minWidth:0}}><div style={{display:"flex",alignItems:"baseline",gap:8}}><span style={{fontSize:14,fontWeight:600,color:C.text}}>{a.label}</span><span style={{fontSize:10,color:C.muted,fontFamily:"monospace"}}>{a.time}</span></div><div style={{display:"flex",gap:10,marginTop:4}}><span style={{fontFamily:"monospace",fontSize:12,color:C.orange}}>{Math.round(a.kcal)} kcal</span>{a.distanceKm&&<span style={{fontFamily:"monospace",fontSize:11,color:C.muted}}>{a.distanceKm}km</span>}{a.durationMin&&<span style={{fontFamily:"monospace",fontSize:11,color:C.muted}}>{a.durationMin}min</span>}</div></div><button onClick={()=>delActivity(a.id)} style={{background:"none",border:"none",cursor:"pointer",color:C.faint,fontSize:18,padding:"0 2px",lineHeight:1}}>×</button></div>)}{!activities.length&&<div style={{textAlign:"center",padding:"36px 0",color:C.muted}}><div style={{fontSize:32}}>{"🏋️"}</div><div style={{fontSize:14,marginTop:8}}>No activities today.</div></div>}</div></>)}
       {view==="history"&&(<>
@@ -1911,7 +2091,6 @@ function ActivityTab({dayData,setDayData,profile,weights,setWeights}){
     {undoEntry&&<div style={{position:"absolute",bottom:80,left:16,right:16,background:C.card,border:`1px solid ${C.lime}`,borderRadius:10,padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:20,boxShadow:`0 4px 16px rgba(0,0,0,0.4)`}}><div><div style={{fontSize:12,color:C.text,fontWeight:600}}>Deleted {undoEntry.entry.weight.toFixed(2)} kg</div><div style={{fontSize:10,color:C.muted}}>{new Date(undoEntry.entry.date+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}</div></div><button onClick={undoDelete} style={{padding:"6px 12px",borderRadius:7,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>↶ Undo</button></div>}
   </div>);
 }
-
 // ── Food Tab (Preps + Products) ───────────────────────────────────────────────
 function FoodTab({mealPreps,setMealPreps,products,setProducts,profile}){
   const [modal,setModal]=useState(false);const [editPrep,setEditPrep]=useState(null);const [showProd,setShowProd]=useState(false);
@@ -1920,6 +2099,7 @@ function FoodTab({mealPreps,setMealPreps,products,setProducts,profile}){
   const [saveToast,setSaveToast]=useState(null);
   const pff=k=>v=>setPForm(p=>({...p,[k]:v}));
   const active=mealPreps.filter(p=>p.remaining>0);const done=mealPreps.filter(p=>p.remaining===0);
+  const [showDone,setShowDone]=useState(false);
   const clearForm=()=>{setPForm({name:"",kcal:"",p:"",c:"",f:"",packageG:"",wholeOnly:false});setScanImgs([]);};
   const addProduct=()=>{
     const np={name:pForm.name.trim(),kcal:parseFloat(pForm.kcal)||0,p:parseFloat(pForm.p)||0,c:parseFloat(pForm.c)||0,f:parseFloat(pForm.f)||0,packageG:parseFloat(pForm.packageG)||null,wholeOnly:!!pForm.wholeOnly};
@@ -2001,7 +2181,7 @@ function FoodTab({mealPreps,setMealPreps,products,setProducts,profile}){
   return(<div style={{height:"100%",position:"relative"}}>
     <div style={{height:"100%",overflowY:"auto",padding:"0 16px 90px"}}>
       <div style={{padding:"18px 0 14px"}}><div style={{fontSize:26,fontWeight:800,color:C.text,letterSpacing:"-0.03em"}}>Food</div><div style={{fontSize:12,color:C.muted}}>{active.length} active prep{active.length!==1?"s":""} · {products.length} products</div></div>
-      <div style={{marginBottom:16}}><div style={{fontSize:11,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Meal Preps</div>{mealPreps.length===0&&<div style={{textAlign:"center",padding:"16px 0",color:C.muted,fontSize:13}}>No meal preps yet. Tap + to create.</div>}{active.length>0&&<div style={{marginBottom:8}}><div style={{display:"flex",flexDirection:"column",gap:8}}>{active.map(p=><PrepCard key={p.id} prep={p}/>)}</div></div>}{done.length>0&&<div><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Finished</div><div style={{display:"flex",flexDirection:"column",gap:8}}>{done.map(p=><PrepCard key={p.id} prep={p}/>)}</div></div>}</div>
+      <div style={{marginBottom:16}}><div style={{fontSize:11,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Meal Preps</div>{mealPreps.length===0&&<div style={{textAlign:"center",padding:"16px 0",color:C.muted,fontSize:13}}>No meal preps yet. Tap + to create.</div>}{active.length>0&&<div style={{marginBottom:8}}><div style={{display:"flex",flexDirection:"column",gap:8}}>{active.map(p=><PrepCard key={p.id} prep={p}/>)}</div></div>}{done.length>0&&<div><button onClick={()=>setShowDone(p=>!p)} style={{width:"100%",padding:"8px 12px",borderRadius:10,background:C.card,border:`1px solid ${showDone?C.border:C.dim}`,color:C.muted,fontWeight:600,cursor:"pointer",fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:showDone?8:0,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}><span>Finished ({done.length})</span><span>{showDone?"▲":"▼"}</span></button>{showDone&&<div style={{display:"flex",flexDirection:"column",gap:8}}>{done.map(p=><PrepCard key={p.id} prep={p}/>)}</div>}</div>}</div>
       <button onClick={()=>setShowProd(p=>!p)} style={{width:"100%",padding:"12px 16px",borderRadius:12,background:C.card,border:`1px solid ${showProd?C.lime:C.border}`,color:showProd?C.lime:C.text,fontWeight:600,cursor:"pointer",fontSize:13,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:showProd?10:0}}><span>Product Labels ({products.length})</span><span style={{fontSize:11}}>{showProd?"▲":"▼"}</span></button>
       {showProd&&<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><span style={{fontSize:11,color:C.muted}}>per 100g</span><button onClick={()=>{setShowAdd(p=>!p);setEditPIdx(null);setPForm({name:"",kcal:"",p:"",c:"",f:"",packageG:"",wholeOnly:false});setScanImgs([]);}} style={{padding:"7px 14px",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Add</button></div><input placeholder="Search products…" value={search} onChange={e=>setSearch(e.target.value)} style={{width:"100%",boxSizing:"border-box",background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"9px 14px",color:C.text,fontSize:13,outline:"none",marginBottom:8}}/>
       {saveToast&&(saveToast.type==="added"||saveToast.type==="updated")&&<div style={{background:`${C.lime}15`,border:`1px solid ${C.lime}66`,borderRadius:10,padding:"9px 13px",marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}><div style={{fontSize:12,color:C.lime,fontWeight:600}}>✓ {saveToast.type==="added"?"Added":"Updated"}: <span style={{fontFamily:"monospace"}}>{saveToast.name}</span></div><button onClick={()=>setSaveToast(null)} style={{background:"none",border:"none",color:C.lime,fontSize:16,cursor:"pointer",padding:"0 4px",lineHeight:1}}>×</button></div>}
@@ -2017,7 +2197,7 @@ function FoodTab({mealPreps,setMealPreps,products,setProducts,profile}){
 
 // ── Analysis Tab ──────────────────────────────────────────────────────────────
 // ── Coach Panel — free-form Q&A with full app context ───────────────────────
-function CoachPanel({profile, weights, products, mealPreps}) {
+function CoachPanel({profile, weights, products, mealPreps, weightPhases}) {
   const [question, setQuestion] = useState("");
   const [history, setHistory] = useState([]); // [{role, content}]
   const [loading, setLoading] = useState(false);
@@ -2026,17 +2206,20 @@ function CoachPanel({profile, weights, products, mealPreps}) {
   const scrollRef = useRef(null);
   const apiKey = profile?.apiKey;
 
-  // Load last 7 days of logs once on mount, refresh when history grows
-  useEffect(() => {
-    store.get("fit_dates", []).then(async ds => {
-      const out = {};
-      for (const d of ds.slice(0, 7)) {
-        const log = await store.get(`fit_day_${d}`, null);
-        if (log) out[d] = log;
-      }
-      setRecentLogs(out);
-    });
-  }, []);
+  // Load recent logs on mount — also refreshed before each question so coach
+  // always sees meals logged earlier in the same session.
+  const loadLogs = async () => {
+    const ds = await store.get("fit_dates", []);
+    const out = {};
+    for (const d of ds.slice(0, 7)) {
+      const log = await store.get(`fit_day_${d}`, null);
+      if (log) out[d] = log;
+    }
+    setRecentLogs(out);
+    return out;
+  };
+
+  useEffect(() => { loadLogs(); }, []);
 
   // Auto-scroll history when new messages added
   useEffect(() => {
@@ -2096,6 +2279,20 @@ function CoachPanel({profile, weights, products, mealPreps}) {
         ctx += "\nHIGH-PROTEIN PANTRY ITEMS: " + high.map(p => p.name + " ("+p.kcal+"k/"+p.p+"P per 100g)").join("; ") + "\n";
       }
     }
+    // Weight phases — gives coach timeline context for goal transitions
+    if ((weightPhases||[]).length) {
+      ctx += "\nWEIGHT PHASES:\n";
+      const sorted = [...weightPhases].sort((a,b) => b.startDate.localeCompare(a.startDate)).slice(0,5);
+      for (const p of sorted) {
+        const isCurrent = !p.endDate;
+        const endW = p.endWeight ?? (isCurrent ? weights[0]?.weight : null);
+        const delta = (endW != null && p.startWeight != null) ? (endW - p.startWeight).toFixed(2) : "?";
+        const dur = p.endDate
+          ? Math.round((new Date(p.endDate+"T12:00:00") - new Date(p.startDate+"T12:00:00")) / 86400000) + "d"
+          : Math.round((Date.now() - new Date(p.startDate+"T12:00:00")) / 86400000) + "d so far";
+        ctx += "  " + (isCurrent?"[ACTIVE] ":"") + p.label + " (" + p.goal + "): " + p.startDate + " → " + (p.endDate||"now") + " (" + dur + "), " + (p.startWeight||"?") + "kg → " + (endW||"?") + "kg = " + (parseFloat(delta)>0?"+":"") + delta + "kg\n";
+      }
+    }
     return ctx;
   };
 
@@ -2103,6 +2300,8 @@ function CoachPanel({profile, weights, products, mealPreps}) {
     if (!q.trim() || loading) return;
     setErr(null);
     setQuestion("");
+    // Refresh logs so coach sees any meals logged since the tab was opened
+    const freshLogs = await loadLogs();
     const ctx = buildContext();
     const newUserMsg = { role: "user", content: q };
     const updatedHistory = [...history, newUserMsg];
@@ -2164,7 +2363,7 @@ function CoachPanel({profile, weights, products, mealPreps}) {
   </div>);
 }
 
-function AnalysisTab({weights,profile,setProfile,progressPhotos,setProgressPhotos,products,mealPreps}){
+function AnalysisTab({weights,profile,setProfile,progressPhotos,setProgressPhotos,products,mealPreps,weightPhases}){
   const [imgs,setImgs]=useState([]);const [analyzing,setAnalyzing]=useState(false);const [result,setResult]=useState(null);const [err,setErr]=useState(null);const [expanded,setExpanded]=useState(null);
   const latestWeight=weights[0]?.weight;const trend=weeklyTrend(weights);const gc=gCol(profile.goal);
   const spark=[...weights].reverse().slice(-20);const W=300,H=60;const vals=spark.map(w=>w.weight);const hasT=profile.targetWeightKg&&spark.length>1;const sMin=vals.length?Math.min(...vals,(hasT?profile.targetWeightKg:Infinity))-0.5:65;const sMax=vals.length?Math.max(...vals)+0.5:70;const px=i=>spark.length>1?(i/(spark.length-1))*W:W/2;const py=v=>H-((v-sMin)/(sMax-sMin))*(H-8)-4;
@@ -2208,7 +2407,7 @@ function AnalysisTab({weights,profile,setProfile,progressPhotos,setProgressPhoto
         return (<div style={{flex:2,background:C.bg,borderRadius:8,padding:"8px 10px"}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase"}}>ETA</div><div style={{fontSize:12,color:C.muted}}>{msg}</div></div>);
       })():null}</div>
     </div>}
-    <CoachPanel profile={profile} weights={weights} products={products} mealPreps={mealPreps}/>
+    <CoachPanel profile={profile} weights={weights} products={products} mealPreps={mealPreps} weightPhases={weightPhases}/>
     <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"14px 16px",marginBottom:12}}>
       <div style={{fontSize:14,fontWeight:600,color:C.text,marginBottom:4}}>Body Composition Analysis</div>
       <div style={{fontSize:12,color:C.muted,marginBottom:10}}>Upload a photo — AI assesses physique vs goal: <span style={{color:gc}}>"{profile.goalNote||"visible abs"}"</span></div>
@@ -2276,7 +2475,8 @@ function HistoryTab({weights,products,profile}){
       {dates.slice(0,visibleCount).map(date=>{
         const log=logs[date];if(!log)return null;
         const dt=DAY_TYPES[log.dayType]||DAY_TYPES.rest;const actKcal=(log.activities||[]).reduce((s,a)=>s+a.kcal,0)+(log.burnedExtra||0);
-        const totals=log.meals?.reduce((a,m)=>({kcal:a.kcal+m.kcal,protein:a.protein+m.protein}),{kcal:0,protein:0})||{kcal:0,protein:0};
+        // Include all four macros in totals so carbs+fat appear in the collapsed row
+        const totals=log.meals?.reduce((a,m)=>({kcal:a.kcal+m.kcal,protein:a.protein+(m.protein||0),carbs:a.carbs+(m.carbs||0),fat:a.fat+(m.fat||0)}),{kcal:0,protein:0,carbs:0,fat:0})||{kcal:0,protein:0,carbs:0,fat:0};
         const tagEmojis=(log.tags||[]).map(tid=>DAY_TAGS.find(t=>t.id===tid)?.emoji).filter(Boolean);
         const dayWeight=weightByDate[date];const isExp=expanded===date;
         // Use the weight closest to this date (or latest weight ever logged, or target weight,
@@ -2284,13 +2484,11 @@ function HistoryTab({weights,products,profile}){
         // makes targetKcal=0 and the status falls back to a hardcoded "≥1600 = ✓" heuristic
         // which incorrectly shows green checkmarks even on big overshoots.
         const wForDay = dayWeight || weights[0]?.weight || profile?.targetWeightKg || 70;
-        const dayTarget = getDT(profile||{},log.dayType||"rest",wForDay,log.burnedExtra||0,(log.activities||[]).length>0);
+        const dayTarget = getDT(profile||{},log.dayType||"rest",wForDay,log.burnedExtra||0,(log.activities||[]).length>0,log.dailySteps||0);
         const targetKcal = dayTarget?.kcal || 0;
         // Status: how does today's intake compare to target, given the goal?
-        // - cut: under target = good (✓), within +75 = OK (~), over by >75 = bad (✗)
-        // - maintain: within ±75 = good (✓), outside = bad (✗)
-        // - bulk: at or above target = good (✓), under = bad (✗)
-        // If no meals logged yet, show pending ○
+        // Margin: 150 kcal either side (cut: +150 OK, maintain: ±150 green, bulk: -150 OK)
+        const MARGIN = 150;
         let status = "○", statusColor = C.muted;
         if (totals.kcal > 0 && targetKcal > 0) {
           const diff = totals.kcal - targetKcal;
@@ -2299,13 +2497,13 @@ function HistoryTab({weights,products,profile}){
           const goal = log.goalMode || profile?.goal || "cut";
           if (goal === "cut") {
             if (diff <= 0) { status = "✓"; statusColor = C.lime; }
-            else if (diff <= 75) { status = "~"; statusColor = C.yellow; }
+            else if (diff <= MARGIN) { status = "~"; statusColor = C.yellow; }
             else { status = "✗"; statusColor = C.red; }
           } else if (goal === "bulk") {
-            if (diff >= -75) { status = "✓"; statusColor = C.lime; }
+            if (diff >= -MARGIN) { status = "✓"; statusColor = C.lime; }
             else { status = "✗"; statusColor = C.red; }
-          } else { // maintain
-            if (Math.abs(diff) <= 75) { status = "✓"; statusColor = C.lime; }
+          } else { // maintain — ±150 kcal counts as green
+            if (Math.abs(diff) <= MARGIN) { status = "✓"; statusColor = C.lime; }
             else { status = diff > 0 ? "↑" : "↓"; statusColor = C.red; }
           }
         } else if (totals.kcal > 0) {
@@ -2323,20 +2521,31 @@ function HistoryTab({weights,products,profile}){
               <div style={{display:"flex",alignItems:"center",gap:5}}><span style={{fontSize:13,fontWeight:600,color:C.text}}>{new Date(date+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}</span>{log.goalMode&&<span style={{fontSize:9,padding:"1px 6px",borderRadius:10,background:log.goalMode==="cut"?`${C.orange}25`:log.goalMode==="bulk"?`${C.blue}25`:`${C.lime}25`,color:log.goalMode==="cut"?C.orange:log.goalMode==="bulk"?C.blue:C.lime,fontWeight:600,fontFamily:"monospace"}}>{log.goalMode}</span>}{tagEmojis.map((e,i)=><span key={i} style={{fontSize:12}}>{e}</span>)}</div>
               <div style={{marginTop:4,height:3,background:C.dim,borderRadius:2,width:80,overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(barFillPct,100)}%`,background:barFillColor,borderRadius:2}}/></div>
             </div>
-            {/* Weight shown in collapsed row */}
             {dayWeight&&<div style={{textAlign:"center"}}><div style={{fontFamily:"monospace",fontSize:12,fontWeight:700,color:C.lime}}>{dayWeight.toFixed(1)}kg</div><div style={{fontSize:9,color:C.muted}}>weight</div></div>}
             <div style={{textAlign:"right"}}>
               <div style={{fontFamily:"monospace",fontSize:13,fontWeight:700,color:statusColor}}>{Math.round(totals.kcal)}<span style={{fontSize:10,marginLeft:3}}>{status}</span></div>
               {targetKcal>0&&<div style={{fontFamily:"monospace",fontSize:9,color:C.muted}}>target {targetKcal}</div>}
               <div style={{fontFamily:"monospace",fontSize:10,color:C.blue}}>{Math.round(totals.protein)}g P</div>
-              {actKcal>0&&<div style={{fontFamily:"monospace",fontSize:10,color:C.orange}}>+{Math.round(actKcal)}</div>}
+              <div style={{fontFamily:"monospace",fontSize:10,color:C.orange}}>{Math.round(totals.carbs)}g C</div>
+              <div style={{fontFamily:"monospace",fontSize:10,color:C.purple}}>{Math.round(totals.fat)}g F</div>
+              {actKcal>0&&<div style={{fontFamily:"monospace",fontSize:10,color:C.orange}}>+{Math.round(actKcal)}🔥</div>}
             </div>
             <span style={{color:C.muted,fontSize:11}}>{isExp?"▲":"▼"}</span>
           </button>
           {isExp&&<div style={{padding:"0 14px 14px",borderTop:`1px solid ${C.border}`}}>
             <div style={{marginTop:10,marginBottom:10}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Day type</div><div style={{display:"flex",gap:5}}>{Object.entries(DAY_TYPES).map(([key,val])=>{const active=log.dayType===key;return(<button key={key} onClick={()=>updateLog(date,{...log,dayType:key})} style={{flex:1,padding:"6px 3px",borderRadius:8,border:`1px solid ${active?C.lime:C.border}`,background:active?`${C.lime}18`:C.bg,color:active?C.lime:C.muted,fontWeight:active?700:400,cursor:"pointer",fontSize:9,lineHeight:1.3,textAlign:"center"}}><div style={{fontSize:13}}>{val.icon}</div><div>{val.label}</div></button>);})}</div></div>
+            {/* Steps for past days — affects the displayed target retroactively */}
+            <div style={{marginBottom:10,display:"flex",alignItems:"center",gap:8,background:C.bg,borderRadius:8,padding:"8px 11px"}}>
+              <span style={{fontSize:11,color:C.muted,flexShrink:0}}>👣 Steps</span>
+              <input type="text" inputMode="numeric" pattern="[0-9]*" value={log.dailySteps||""} onChange={e=>{const v=parseInt(e.target.value.replace(/\D/g,""))||0;updateLog(date,{...log,dailySteps:v});}} placeholder="0" style={{width:80,background:C.card,border:`1px solid ${C.border}`,borderRadius:6,padding:"5px 8px",color:C.text,fontSize:13,fontFamily:"monospace",fontWeight:700,outline:"none"}}/>
+              <span style={{fontSize:10,color:C.muted}}>steps</span>
+              {(log.dailySteps||0)>0&&<span style={{fontSize:10,color:C.orange,fontFamily:"monospace",marginLeft:"auto"}}>+{stepsKcal(log.dailySteps,profile?.activityLevel||"sedentary",wForDay)}kcal</span>}
+            </div>
             <div style={{marginBottom:10}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Tags</div><div style={{display:"flex",flexWrap:"wrap",gap:5}}>{DAY_TAGS.map(tag=>{const active=(log.tags||[]).includes(tag.id);return(<button key={tag.id} onClick={()=>toggleTag(date,tag.id)} style={{padding:"5px 10px",borderRadius:20,border:`1px solid ${active?C.lime:C.border}`,background:active?`${C.lime}18`:C.bg,color:active?C.lime:C.muted,cursor:"pointer",fontSize:11}}>{tag.emoji} {tag.label}</button>);})}</div></div>
-            <div style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}><span style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}>Meals ({log.meals?.length||0})</span><button onClick={()=>setAddMealDate(addMealDate===date?null:date)} style={{fontSize:11,color:C.lime,background:"none",border:`1px solid ${C.lime}`,borderRadius:6,padding:"3px 10px",cursor:"pointer",fontWeight:600}}>+ Add</button></div>{addMealDate===date&&<div style={{marginBottom:8}}><AddMealManual onAdd={meal=>addMeal(date,meal)} onCancel={()=>setAddMealDate(null)}/></div>}<div style={{display:"flex",flexDirection:"column",gap:6}}>{log.meals?.map(m=><div key={m.id}>{editMeal?.date===date&&editMeal?.id===m.id?<EditMealInline meal={m} onSave={meal=>updateMeal(date,meal)} onCancel={()=>setEditMeal(null)} products={products} apiKey={profile?.apiKey}/>:<div style={{background:C.bg,borderRadius:10,padding:"9px 12px",display:"flex",alignItems:"center",gap:8}}><div style={{flex:1,minWidth:0}}><div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:3}}><span style={{fontSize:13,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.name}</span><span style={{fontSize:10,color:C.muted,fontFamily:"monospace",flexShrink:0}}>{m.time}</span></div><div style={{display:"flex",gap:8}}><Chip val={m.kcal} label="k" color={C.lime}/><Chip val={m.protein} label="P" color={C.blue}/><Chip val={m.carbs} label="C" color={C.orange}/><Chip val={m.fat} label="F" color={C.purple}/></div></div><button onClick={()=>setEditMeal({date,id:m.id})} style={{background:"none",border:`1px solid ${C.border}`,color:C.muted,fontSize:12,cursor:"pointer",padding:"4px 7px",borderRadius:6,lineHeight:1}}>✎</button><button onClick={()=>deleteMeal(date,m.id)} style={{background:"none",border:"none",color:C.faint,fontSize:16,cursor:"pointer",padding:"0 2px",lineHeight:1}}>×</button></div>}</div>)}{!log.meals?.length&&<div style={{fontSize:12,color:C.muted,padding:"4px 0"}}>No meals.</div>}</div></div>
+            <div style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}><span style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}>Meals ({log.meals?.length||0})</span><button onClick={()=>setAddMealDate(addMealDate===date?null:date)} style={{fontSize:11,color:C.lime,background:"none",border:`1px solid ${C.lime}`,borderRadius:6,padding:"3px 10px",cursor:"pointer",fontWeight:600}}>+ Add</button></div>{addMealDate===date&&<div style={{marginBottom:8}}><AddMealManual onAdd={meal=>addMeal(date,meal)} onCancel={()=>setAddMealDate(null)}/></div>}<div style={{display:"flex",flexDirection:"column",gap:6}}>{log.meals?.map(m=>{
+              const mtEmoji=["🌅","☀️","🌙","🍎","🥤"][["breakfast","lunch","dinner","snack","drink"].indexOf(m.mealType)]||"";
+              return(<div key={m.id}>{editMeal?.date===date&&editMeal?.id===m.id?<EditMealInline meal={m} onSave={meal=>updateMeal(date,meal)} onCancel={()=>setEditMeal(null)} products={products} apiKey={profile?.apiKey}/>:<div style={{background:C.bg,borderRadius:10,padding:"9px 12px"}}><div style={{display:"flex",alignItems:"center",gap:8}}><div style={{flex:1,minWidth:0}}><div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:3}}><span style={{fontSize:13,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{mtEmoji} {m.name}</span><span style={{fontSize:10,color:C.muted,fontFamily:"monospace",flexShrink:0}}>{m.time}</span></div><div style={{display:"flex",gap:8}}><Chip val={m.kcal} label="k" color={C.lime}/><Chip val={m.protein} label="P" color={C.blue}/><Chip val={m.carbs} label="C" color={C.orange}/><Chip val={m.fat} label="F" color={C.purple}/></div></div><button onClick={()=>setEditMeal({date,id:m.id})} style={{background:"none",border:`1px solid ${C.border}`,color:C.muted,fontSize:12,cursor:"pointer",padding:"4px 7px",borderRadius:6,lineHeight:1}}>✎</button><button onClick={()=>deleteMeal(date,m.id)} style={{background:"none",border:"none",color:C.faint,fontSize:16,cursor:"pointer",padding:"0 2px",lineHeight:1}}>×</button></div>{m.notes&&<div style={{fontSize:10,color:C.muted,marginTop:5,lineHeight:1.4,wordBreak:"break-word"}}>📋 {m.notes}</div>}</div>}</div>);
+            })}{!log.meals?.length&&<div style={{fontSize:12,color:C.muted,padding:"4px 0"}}>No meals.</div>}</div></div>
             <div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}><span style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}>Activities{actKcal>0&&<span style={{color:C.orange,marginLeft:6}}>+{Math.round(actKcal)}kcal</span>}</span><button onClick={()=>setAddActDate(addActDate===date?null:date)} style={{fontSize:11,color:C.orange,background:"none",border:`1px solid ${C.orange}`,borderRadius:6,padding:"3px 10px",cursor:"pointer",fontWeight:600}}>+ Add</button></div>{addActDate===date&&<div style={{marginBottom:8}}><AddActManual onAdd={act=>addAct(date,act)} onCancel={()=>setAddActDate(null)}/></div>}<div style={{display:"flex",flexDirection:"column",gap:6}}>{(log.activities||[]).map(a=><div key={a.id}>{editAct?.date===date&&editAct?.id===a.id?<EditActInline act={a} onSave={act=>updateAct(date,act)} onCancel={()=>setEditAct(null)}/>:<div style={{background:C.bg,borderRadius:10,padding:"9px 12px",display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:18}}>{a.type==="gym"?"🏋️":a.type==="run"?"🏃":"🚶"}</span><div style={{flex:1}}><span style={{fontSize:13,color:C.text}}>{a.label}</span><div style={{display:"flex",gap:8,marginTop:2}}><span style={{fontFamily:"monospace",fontSize:11,color:C.orange}}>{Math.round(a.kcal)}kcal</span>{a.distanceKm&&<span style={{fontFamily:"monospace",fontSize:10,color:C.muted}}>{a.distanceKm}km</span>}{a.durationMin&&<span style={{fontFamily:"monospace",fontSize:10,color:C.muted}}>{a.durationMin}min</span>}</div></div><button onClick={()=>setEditAct({date,id:a.id})} style={{background:"none",border:`1px solid ${C.border}`,color:C.muted,fontSize:12,cursor:"pointer",padding:"4px 7px",borderRadius:6,lineHeight:1}}>✎</button><button onClick={()=>deleteAct(date,a.id)} style={{background:"none",border:"none",color:C.faint,fontSize:16,cursor:"pointer",padding:"0 2px",lineHeight:1}}>×</button></div>}</div>)}{!(log.activities||[]).length&&<div style={{fontSize:12,color:C.muted,padding:"4px 0"}}>No activities.</div>}</div></div>
           </div>}
         </div>);
@@ -2381,7 +2590,7 @@ function SettingsTab({profile,setProfile,weights,setWeights}){
   const AGE=calcAge(profile.birthday);
   const saveProfile=()=>{setProfile({...pf,heightCm:parseFloat(pf.heightCm)||null,apiKey:pf.apiKey||""});setEditProf(false);};
   const exportData=async()=>{
-    const keys=["fit_dates","fit_weights","fit_products","fit_mealpreps","fit_profile","fit_photos"];
+    const keys=["fit_dates","fit_weights","fit_products","fit_mealpreps","fit_profile","fit_photos","fit_weight_phases","fit_seeded_presets"];
     const out={};for(const k of keys){out[k]=await store.get(k,null);}
     const dates=out.fit_dates||[];for(const d of dates){out["fit_day_"+d]=await store.get("fit_day_"+d,null);}
     const blob=new Blob([JSON.stringify(out,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="fitness-data-"+TODAY()+".json";a.click();URL.revokeObjectURL(url);setExportMsg("Exported!");setTimeout(()=>setExportMsg(""),2000);
@@ -2563,7 +2772,7 @@ function Nav({tab,setTab}){
 
 // ── App ───────────────────────────────────────────────────────────────────────
 function App(){
-  const [tab,setTab]=useState("today");const [dayData,setDayData_]=useState(null);const [weights,setWeights_]=useState([]);const [products,setProducts_]=useState([]);const [mealPreps,setMealPreps_]=useState([]);const [profile,setProfile_]=useState(null);const [progressPhotos,setProgressPhotos_]=useState([]);const [ready,setReady]=useState(false);
+  const [tab,setTab]=useState("today");const [dayData,setDayData_]=useState(null);const [weights,setWeights_]=useState([]);const [products,setProducts_]=useState([]);const [mealPreps,setMealPreps_]=useState([]);const [profile,setProfile_]=useState(null);const [progressPhotos,setProgressPhotos_]=useState([]);const [weightPhases,setWeightPhases_]=useState([]);const [ready,setReady]=useState(false);
   // `today` is reactive state, not a const. If we use a const, leaving the app open across
   // midnight means React renders with a NEW today value but dayData still holds yesterday's
   // meals — and the setDayData closure writes that stale payload to today's storage key,
@@ -2622,7 +2831,8 @@ function App(){
     if(!day.activities)day.activities=[];if(!day.tags)day.tags=[];
     const wts=await store.get("fit_weights",[]);const preps=await store.get("fit_mealpreps",[]);
     const prof=await store.get("fit_profile",null)||DEFAULT_PROFILE;const photos=await store.get("fit_photos",[]);
-    setProducts_(prods);setDayData_(day);setWeights_(wts);setMealPreps_(preps);setProfile_(prof);setProgressPhotos_(photos);
+    const phases=await store.get("fit_weight_phases",[]);
+    setProducts_(prods);setDayData_(day);setWeights_(wts);setMealPreps_(preps);setProfile_(prof);setProgressPhotos_(photos);setWeightPhases_(phases);
     setToday(bootDate);
     lastLoadedDate.current = bootDate;
     setReady(true);
@@ -2646,6 +2856,7 @@ function App(){
   const setMealPreps=useCallback(upd=>{setMealPreps_(p=>{const n=typeof upd==="function"?upd(p):upd;store.set("fit_mealpreps",n);return n;});},[]);
   const setProfile=useCallback(upd=>{setProfile_(p=>{const n=typeof upd==="function"?upd(p):upd;store.set("fit_profile",n);return n;});},[]);
   const setProgressPhotos=useCallback(upd=>{setProgressPhotos_(p=>{const n=typeof upd==="function"?upd(p):upd;store.set("fit_photos",n);return n;});},[]);
+  const setWeightPhases=useCallback(upd=>{setWeightPhases_(p=>{const n=typeof upd==="function"?upd(p):upd;store.set("fit_weight_phases",n);return n;});},[]);
   const latestWeight=weights[0]?.weight;
   const needsOnboarding=!profile?.birthday||!profile?.heightCm;
   if(!ready||!profile)return(<div style={{background:C.bg,height:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:C.muted,fontFamily:"monospace",fontSize:13}}>Loading…</div></div>);
@@ -2659,9 +2870,9 @@ function App(){
     </div>}
     <div style={{flex:1,overflow:"hidden"}}>
       {tab==="today"&&<TodayTab dayData={dayData} setDayData={setDayData} mealPreps={mealPreps} setMealPreps={setMealPreps} products={products} setProducts={setProducts} profile={profile} latestWeight={latestWeight} weights={weights} setWeights={setWeights} onGoToSettings={()=>setTab("settings")}/>}
-      {tab==="activity"&&<ActivityTab dayData={dayData} setDayData={setDayData} profile={profile} weights={weights} setWeights={setWeights}/>}
+      {tab==="activity"&&<ActivityTab dayData={dayData} setDayData={setDayData} profile={profile} weights={weights} setWeights={setWeights} weightPhases={weightPhases} setWeightPhases={setWeightPhases}/>}
       {tab==="food"&&<FoodTab mealPreps={mealPreps} setMealPreps={setMealPreps} products={products} setProducts={setProducts} profile={profile}/>}
-      {tab==="analysis"&&<AnalysisTab weights={weights} profile={profile} setProfile={setProfile} progressPhotos={progressPhotos} setProgressPhotos={setProgressPhotos} products={products} mealPreps={mealPreps}/>}
+      {tab==="analysis"&&<AnalysisTab weights={weights} profile={profile} setProfile={setProfile} progressPhotos={progressPhotos} setProgressPhotos={setProgressPhotos} products={products} mealPreps={mealPreps} weightPhases={weightPhases}/>}
       {tab==="history"&&<HistoryTab weights={weights} products={products} profile={profile}/>}
       {tab==="settings"&&<SettingsTab profile={profile} setProfile={setProfile} weights={weights} setWeights={setWeights}/>}
     </div>
