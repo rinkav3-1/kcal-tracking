@@ -170,15 +170,22 @@ function dayBurnTotal(dayType, extraBurn, hasLoggedActivity) {
   // This prevents the bug where logging only a short walk on a "Gym day" drops the target.
   return Math.max(logged, planned);
 }
-// Steps burn: ~0.04 kcal/kg/step (standard pedometer formula).
-// We only credit steps that go *above* what the base activity level already implies.
-// Sedentary ≈ 2k steps, desk ≈ 3k, light ≈ 6.5k, moderate ≈ 10k — so we credit
-// the delta above the implied baseline, at ~0.04 kcal/kg/step.
+// Daily-steps TDEE adjustment.
+// Your activity level already ASSUMES a baseline step count (the multiplier bakes it in).
+// When you log actual steps, we adjust TDEE by the difference from that baseline — up if you
+// walked more than assumed, down if less. This can be positive OR negative.
+//
+// Energy per step ≈ bodyweight(kg) × 0.0005 kcal (so ~0.033 kcal/step at 66kg, the standard
+// ~0.04 kcal/step figure for a ~70-80kg person). The previous formula multiplied by weight
+// AND used 0.04, overcounting ~65×.
 const STEP_BASELINE = { sedentary:2000, desk:3000, light:6500, moderate:10000, active:12000 };
 function stepsKcal(steps, activityLevel, weight) {
-  const baseline = STEP_BASELINE[activityLevel] ?? 2000;
-  const extra = Math.max(0, (steps||0) - baseline);
-  return Math.round(extra * 0.04 * (weight||70));
+  // 0 / blank steps = "not logged" → no adjustment, use the activity multiplier as-is.
+  if (!steps || steps <= 0) return 0;
+  const baseline = STEP_BASELINE[activityLevel] ?? 6500;
+  const delta = steps - baseline; // signed: negative if below your assumed baseline
+  const kcalPerStep = (weight||70) * 0.0005;
+  return Math.round(delta * kcalPerStep);
 }
 function getDT(profile,dayType,weight,extraBurn=0,hasLoggedActivity=false,dailySteps=0){
   const tdee=getTDEE(profile,weight);if(!tdee)return FB[dayType]||FB.rest;
@@ -369,50 +376,51 @@ async function aFood(imgs, ps, mt, desc, apiKey) {
       + "  • PACKAGE PHOTO — a product label/wrapper, used ONLY to identify what the ingredient is (so you can match it to a known product or read its name).\n"
       + "  • COMBINED — both a package and a scale visible; the scale number is still the truth.\n\n"
       + "═══ READING THE SCALE DISPLAY — CRITICAL ═══\n"
-      + "Kitchen scales use 7-segment LCD displays. These displays often show TWO things at once:\n"
-      + "  (A) FAINT GHOST DIGITS: a dim '188' or '1888' or '8888' shown in low contrast on one side. These are NOT the weight — they're the LCD's inactive segments showing through, or a tare/zero indicator. IGNORE THEM.\n"
-      + "  (B) THE REAL WEIGHT: shown brightly/boldly, usually with a 'g' unit suffix. This is the only number you want.\n\n"
-      + "RULE: The number you return as weightG is ONLY the bright digits next to the 'g' or 'g/oz' unit label — usually on the RIGHT side of the display. NEVER concatenate or merge ghost digits with real digits.\n\n"
-      + "EXAMPLES OF LCD DISPLAYS:\n"
-      + "  • Display shows faint '1888' on left and bold '47' on right with 'g' label → weightG = 47 (NOT 188, NOT 1888, NOT 18847, NOT 147)\n"
-      + "  • Display shows faint '888' and bold '20g' → weightG = 20 (NOT 88820, NOT 120)\n"
-      + "  • Display shows faint '188' and bold '77g' → weightG = 77 (NOT 18877, NOT 177)\n"
-      + "  • Display shows faint '188' and bright '6g' → weightG = 6 (a tiny amount of chia or spice — NOT 20, NOT 188)\n"
-      + "  • Display shows faint '188' and bright '49g' → weightG = 49 (NOT 149, NOT 188)\n"
-      + "  • Display shows faint '188' and bright '108g' → weightG = 108\n"
-      + "  • Display shows ONLY '95g' brightly → weightG = 95\n"
-      + "  • Display shows 'NET' or 'TARE' indicator — that's a label, not a digit\n\n"
-      + "PER-DIGIT READING PROCEDURE (do this for each scale photo):\n"
-      + "  1. Find the 'g' unit label on the display. The weight digits are the BRIGHT digits immediately to the LEFT of that 'g'.\n"
-      + "  2. Count the bright digits — usually 1, 2, or 3 of them (rarely 4 for >1000g).\n"
-      + "  3. Read each bright digit individually, left to right. e.g. bright digits '4' then '9' followed by 'g' → 49g. Not 149, not 1888, not 49000. Just 49.\n"
-      + "  4. The faint '188' or '8888' ghost pattern to the LEFT is the LCD substrate showing through — every segment of the unused digit positions is faintly lit. IGNORE entirely.\n"
-      + "  5. Single-digit weights (like 6g for chia) are valid and common — don't inflate them.\n\n"
+      + "Kitchen scales use 7-segment LCD displays. These are notoriously hard to read from photos. Apply extreme caution.\n\n"
+      + "TWO THINGS THAT APPEAR ON THE DISPLAY:\n"
+      + "  (A) FAINT GHOST DIGITS: a dim '188', '1888', or '8888' in low contrast. These are the LCD's inactive segments glowing faintly. IGNORE COMPLETELY.\n"
+      + "  (B) THE REAL WEIGHT: bright/bold digits followed by a 'g' unit label. This is the ONLY number you return.\n\n"
+      + "FINDING THE REAL DIGITS:\n"
+      + "  1. Locate the 'g' unit label on the display.\n"
+      + "  2. The bright digits immediately LEFT of 'g' are the weight. Count them: usually 1–3 digits (rarely 4 for >999g).\n"
+      + "  3. Read each bright digit individually, left-to-right. If you see bright '1','0','5' then 'g' → 105. Not 305, not 1105.\n"
+      + "  4. Ghost digits to the far left or right are NEVER part of the reading.\n\n"
+      + "KNOWN FAILURE MODES — avoid every one of these:\n"
+      + "  ✗ '1' misread as '3': On blue backlit LCDs the numeral '1' (two right-side segments) can appear to have ghost segments on the left, looking like '3'. If a digit looks like '3' but the context (small amount like milk splash) suggests '1', flag weightUncertain:true.\n"
+      + "  ✗ Digit order swapped: '12' read as '21', '15' read as '51'. If the result seems implausibly large, flag weightUncertain:true.\n"
+      + "  ✗ Ghost digit prepended: bright '47' with ghost '1' on left read as '147'. The ghost is never part of the value.\n"
+      + "  ✗ Single digit inflated: bright '6g' (e.g. fiber syrup) read as '16' or '60'. Single-digit weights are common for syrups and spices.\n"
+      + "  ✗ Package size used: '1L / 1000g' on a carton is the package, not what was poured. Only use scale digits.\n\n"
+      + "EXAMPLES:\n"
+      + "  • Ghost '188' + bright '47g' → weightG=47 (NOT 147, 188, 18847)\n"
+      + "  • Ghost '188' + bright '6g' → weightG=6 (NOT 16, 60, 188)\n"
+      + "  • Ghost '188' + bright '108g' → weightG=108\n"
+      + "  • Bright '1','0','5','g' → weightG=105 (NOT 305 — even if the '1' looks slightly wide)\n"
+      + "  • Bright '1','2','g' → weightG=12 (NOT 20, NOT 21)\n"
+      + "  • Bright '1','5','g' → weightG=15 (NOT 6, NOT 51)\n"
+      + "  • Blue LCD, small amount visible, bright '6' then 'g' → weightG=6\n\n"
+      + "MANDATORY SELF-CHECK before emitting each weightG:\n"
+      + "  Ask yourself: 'Is this a plausible amount for this ingredient at this meal?' and 'Did I accidentally include a ghost digit?'\n"
+      + "  If the number seems off by more than 2× compared to what's visible in the bowl/plate, set weightUncertain:true and explain in _scaleRead.\n\n"
       + "🚫 ABSOLUTELY FORBIDDEN:\n"
       + "  • Setting weightG to 100 as a default/guess.\n"
-      + "  • Setting multiple ingredients to identical round numbers (100/100/100, 50/100/150).\n"
-      + "  • Concatenating ghost LCD digits with the real weight (e.g. reading faint '188' + real '47' as '147' or '1847').\n"
-      + "  • Adding any digit you 'think might be there' that isn't clearly bright on the display.\n"
-      + "  • Inflating tiny readings: if you see bright '6g', the answer is 6, not 16 or 60 or 88.\n\n"
+      + "  • Multiple ingredients at identical round numbers.\n"
+      + "  • Concatenating ghost digits with real digits.\n"
+      + "  • Silently emitting a reading you're not confident about — use weightUncertain:true instead.\n\n"
       + "OTHER WEIGHT RULES:\n"
-      + "  • Each scale photo = one ingredient with a definite weight. The scale is zeroed between ingredients.\n"
-      + "  • If you genuinely cannot read the bright digits, set 'weightUncertain': true and give a reasonable estimate based on visible portion size — do NOT silently use 100.\n"
-      + "  • THE GRAMS PRINTED ON A PACKAGE LABEL ('180g pack', '450g net weight') IS THE PACKAGE SIZE, NOT HOW MUCH WAS USED. Don't copy package size into weightG when a scale photo exists.\n"
-      + "  • Only use printed package weight as the consumed amount when there's NO scale photo for that ingredient AND it's a single-serve item plausibly eaten whole (chip bag, protein bar, sachet).\n\n"
-      + "MORE EXAMPLES:\n"
-      + "  • User shows a 180g curd package AND a scale display with bright '95g' (and maybe faint ghost digits): weightG = 95.\n"
-      + "  • User shows yogurt pot AND scale with bright '20g' (faint ghost on left): weightG = 20.\n"
-      + "  • User shows almond milk carton (1L) AND scale showing '90g': weightG = 90.\n"
-      + "  • User shows ONLY a 55g protein bar wrapper, no scale: weightG = 55 (assumed whole bar).\n\n"
+      + "  • Each scale photo = one ingredient. Scale is zeroed between each.\n"
+      + "  • If genuinely unreadable, set weightUncertain:true and estimate from visible portion size.\n"
+      + "  • Package label weight ('180g pack', '1L') is package size NOT consumed amount.\n"
+      + "  • Single-serve item with NO scale photo → use package size only if plausibly eaten whole.\n\n"
       + "OTHER RULES:\n"
       + "1. DESCRIPTION PRIORITY: if the description names a specific product or flavour, match it EXACTLY from known products list.\n"
       + "2. Identify EVERY ingredient across ALL " + compressed.length + " photos. Skip none — small items like syrups, oils, sweeteners count.\n"
       + "3. Per ingredient: kcal/protein/carbs/fat MUST be PER-100g reference values for that ingredient (NOT scaled to weight). If matched to a known product, copy its per-100g values exactly. If not matched, give standard reference per-100g values for that food.\n"
       + "4. Top-level kcal/protein/carbs/fat = meal totals (already scaled): sum of (per-100g × weightG / 100). totalGrams = sum of weightG.\n"
       + "5. Unknown product: if label visible in photo, read it and populate newProduct with brand name and per-100g macros.\n"
-      + "6. For each ingredient, include a '_scaleRead' field with the literal digits you saw bright on the scale (e.g. '47', '6', '108') — this helps the user verify.\n\n"
+      + "6. For each ingredient include '_scaleRead': the literal bright digits you saw (e.g. '47', '6', '108'). If weightUncertain:true, add a brief note like 'bright digits unclear, estimated from portion'.\n\n"
       + "Reply ONLY with this JSON:\n"
-      + '{"type":"meal","name":"","kcal":0,"protein":0,"carbs":0,"fat":0,"totalGrams":0,"notes":"","newProduct":{"name":"","kcal":0,"p":0,"c":0,"f":0},"ingredients":[{"name":"","weightG":0,"_scaleRead":"","kcal":0,"protein":0,"carbs":0,"fat":0}]}';
+      + '{"type":"meal","name":"","kcal":0,"protein":0,"carbs":0,"fat":0,"totalGrams":0,"notes":"","newProduct":{"name":"","kcal":0,"p":0,"c":0,"f":0},"ingredients":[{"name":"","weightG":0,"_scaleRead":"","weightUncertain":false,"kcal":0,"protein":0,"carbs":0,"fat":0}]}';
   }
   return callAI([{ type:"text", text:prompt }, ...iBlks(compressed)], apiKey, VISION_MODEL, 2500);
 }
@@ -565,6 +573,13 @@ function Ring({value,max,color,label}){
   </div>);
 }
 function Chip({val,label,color}){return <span style={{fontFamily:"monospace",fontSize:11}}><span style={{color}}>{Math.round(val)}</span><span style={{color:C.muted}}>{label}</span></span>;}
+function InfoTip({text}){
+  const [open,setOpen]=useState(false);
+  return(<span style={{position:"relative",display:"inline-flex",alignItems:"center"}}>
+    <button onClick={()=>setOpen(p=>!p)} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:"50%",width:16,height:16,cursor:"pointer",fontSize:9,color:C.muted,display:"inline-flex",alignItems:"center",justifyContent:"center",padding:0,lineHeight:1,flexShrink:0}}>ⓘ</button>
+    {open&&<div onClick={()=>setOpen(false)} style={{position:"absolute",left:0,top:20,background:C.card,border:`1px solid ${C.lime}40`,borderRadius:8,padding:"8px 10px",fontSize:11,color:C.muted,lineHeight:1.5,zIndex:50,width:240,boxShadow:"0 4px 16px rgba(0,0,0,0.5)",cursor:"pointer"}}>{text}<div style={{fontSize:9,color:C.faint,marginTop:4}}>tap to dismiss</div></div>}
+  </span>);
+}
 function Field({label,value,onChange,type="text",placeholder="",disabled=false}){
   const isNum = type === "number";
   // For numeric fields: use type="text" + inputMode="decimal" + a regex filter.
@@ -923,8 +938,11 @@ function IngredientConfirmPanel({ingredients, setIngredients, products, onConfir
                   {ing._scaleRead && (() => {
                     const wG = parseFloat(ing.weightG) || 0;
                     const sR = parseFloat(String(ing._scaleRead).replace(/[^\d.]/g,"")) || 0;
-                    const mismatch = sR > 0 && wG > 0 && Math.abs(wG - sR) / Math.max(wG, sR) > 0.15;
-                    return (<div style={{fontSize:9,marginTop:2,fontFamily:"monospace",color:mismatch?"#ff8080":C.muted}}>{mismatch?"⚠ ":""}AI read scale as: {ing._scaleRead}g{mismatch?" — looks off, please verify":""}</div>);
+                    // Threshold lowered to 5% — catches errors like 105 vs 108, 12 vs 15
+                    const mismatch = sR > 0 && wG > 0 && Math.abs(wG - sR) / Math.max(wG, sR) > 0.05;
+                    const uncertain = !!ing.weightUncertain;
+                    const warn = mismatch || uncertain;
+                    return (<div style={{fontSize:9,marginTop:2,fontFamily:"monospace",color:warn?"#ff8080":C.muted}}>{warn?"⚠ ":""}AI read scale as: {ing._scaleRead}g{mismatch?" — looks off, please verify":uncertain?" — AI flagged as uncertain, please verify":""}</div>);
                   })()}
                 </div>
                 <input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={ing.weightG} onChange={e => setIngredients(p => p.map((x, j) => j !== i ? x : {...x, weightG: e.target.value}))}
@@ -1613,7 +1631,8 @@ function AddActSheet({onAdd,onClose,apiKey}){
   const est=type==="run"?Math.round((parseFloat(dist)||0)*62):type==="walk"?Math.round((parseFloat(dist)||0)*48):0;const finalKcal=parseFloat(kcal)||est;
   const scan=async()=>{if(!imgs.length)return;setLoading(true);setErr(null);try{const res=await aAct(imgs,apiKey);if(res.kcal)setKcal(String(Math.round(res.kcal)));if(res.distanceKm)setDist(String(res.distanceKm));if(res.durationMin)setDur(String(res.durationMin));if(res.actType&&["run","walk","gym"].includes(res.actType))setType(res.actType);}catch(e){setErr(String(e.message||e));}setLoading(false);};
   const confirm=()=>{if(!finalKcal)return;const labels={gym:"Gym Session",run:`Run${dist?` ${parseFloat(dist)}km`:""}`,walk:`Walk${dist?` ${parseFloat(dist)}km`:""}`};onAdd({id:Date.now(),type,label:labels[type],kcal:finalKcal,distanceKm:parseFloat(dist)||null,durationMin:parseFloat(dur)||null,time:new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})});};
-  return(<Sheet onClose={onClose} title="Log Activity"><div style={{display:"flex",gap:6,marginBottom:16}}>{[["🏋️ Gym","gym"],["🏃 Run","run"],["🚶 Walk","walk"]].map(([lbl,t])=>(<button key={t} onClick={()=>setType(t)} style={{flex:1,padding:"9px 4px",borderRadius:10,border:`1px solid ${type===t?C.lime:C.border}`,background:type===t?`${C.lime}20`:C.card,color:type===t?C.lime:C.muted,fontWeight:type===t?700:500,cursor:"pointer",fontSize:12}}>{lbl}</button>))}</div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:9,marginBottom:6}}>{(type==="run"||type==="walk")&&<Field label="Distance km" value={dist} onChange={setDist} type="number" placeholder="10"/>}<Field label="Duration min" value={dur} onChange={setDur} type="number" placeholder="45"/><Field label="Active kcal" value={kcal} onChange={setKcal} type="number" placeholder={est?String(est):"0"}/></div><div style={{fontSize:10,color:C.muted,marginBottom:12,lineHeight:1.4}}>💡 Enter <b>active calories</b> (the burn above your resting baseline). On Garmin/Apple/Strava use "Active Calories", not "Total Calories" — your daily TDEE already counts the resting burn.</div>{est>0&&!parseFloat(kcal)&&<div style={{fontSize:11,color:C.muted,fontFamily:"monospace",marginBottom:10}}>Auto-estimated: ~{est} kcal</div>}<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"12px 14px",marginBottom:12}}><div style={{fontSize:11,color:C.muted,marginBottom:8}}>Or scan Strava / Apple Fitness / Garmin screenshot</div><ImgZone imgs={imgs} setImgs={setImgs} compact/>{imgs.length>0&&<button onClick={scan} disabled={loading} style={{width:"100%",padding:"9px 0",borderRadius:8,background:loading?C.faint:C.orange,color:"#000",fontWeight:700,border:"none",cursor:loading?"default":"pointer",fontSize:13,marginTop:8}}>{loading?"Scanning…":"Read App Screenshot"}</button>}</div>{err&&<div style={{background:"#1e0a0a",border:"1px solid #5a1a1a",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#ff8080",marginBottom:10,wordBreak:"break-word"}}>{err}</div>}{finalKcal>0&&<div style={{background:"#140e03",border:"1px solid #2e1e07",borderRadius:10,padding:"10px 14px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:12,color:C.muted}}>Adds to daily target</span><span style={{fontFamily:"monospace",fontSize:18,fontWeight:800,color:C.orange}}>+{finalKcal} kcal</span></div>}<div style={{display:"flex",gap:8}}><button onClick={onClose} style={{flex:1,padding:"11px 0",borderRadius:10,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer"}}>Cancel</button><button onClick={confirm} disabled={!finalKcal} style={{flex:2,padding:"11px 0",borderRadius:10,background:finalKcal?C.lime:C.faint,color:"#000",fontWeight:700,border:"none",cursor:finalKcal?"pointer":"default",fontSize:15}}>Log Activity</button></div></Sheet>);
+  return(<Sheet onClose={onClose} title="Log Activity"><div style={{display:"flex",gap:6,marginBottom:type==="walk"?6:16}}>{[["🏋️ Gym","gym"],["🏃 Run","run"],["🚶 Walk","walk"]].map(([lbl,t])=>(<button key={t} onClick={()=>setType(t)} style={{flex:1,padding:"9px 4px",borderRadius:10,border:`1px solid ${type===t?C.lime:C.border}`,background:type===t?`${C.lime}20`:C.card,color:type===t?C.lime:C.muted,fontWeight:type===t?700:500,cursor:"pointer",fontSize:12}}>{lbl}</button>))}</div>
+    {type==="walk"&&<div style={{fontSize:11,color:C.muted,marginBottom:12,lineHeight:1.5,display:"flex",alignItems:"flex-start",gap:6}}><span style={{flexShrink:0}}>ⓘ</span><span>For a <b style={{color:C.text}}>deliberate walk</b> — a separate outing you went on. Don't also count those steps in Daily Steps. Use Daily Steps only for incidental movement (errands, around home) that doesn't get its own activity entry.</span></div>}<div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:9,marginBottom:6}}>{(type==="run"||type==="walk")&&<Field label="Distance km" value={dist} onChange={setDist} type="number" placeholder="10"/>}<Field label="Duration min" value={dur} onChange={setDur} type="number" placeholder="45"/><Field label="Active kcal" value={kcal} onChange={setKcal} type="number" placeholder={est?String(est):"0"}/></div><div style={{fontSize:10,color:C.muted,marginBottom:12,lineHeight:1.4}}>💡 Enter <b>active calories</b> (the burn above your resting baseline). On Garmin/Apple/Strava use "Active Calories", not "Total Calories" — your daily TDEE already counts the resting burn.</div>{est>0&&!parseFloat(kcal)&&<div style={{fontSize:11,color:C.muted,fontFamily:"monospace",marginBottom:10}}>Auto-estimated: ~{est} kcal</div>}<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"12px 14px",marginBottom:12}}><div style={{fontSize:11,color:C.muted,marginBottom:8}}>Or scan Strava / Apple Fitness / Garmin screenshot</div><ImgZone imgs={imgs} setImgs={setImgs} compact/>{imgs.length>0&&<button onClick={scan} disabled={loading} style={{width:"100%",padding:"9px 0",borderRadius:8,background:loading?C.faint:C.orange,color:"#000",fontWeight:700,border:"none",cursor:loading?"default":"pointer",fontSize:13,marginTop:8}}>{loading?"Scanning…":"Read App Screenshot"}</button>}</div>{err&&<div style={{background:"#1e0a0a",border:"1px solid #5a1a1a",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#ff8080",marginBottom:10,wordBreak:"break-word"}}>{err}</div>}{finalKcal>0&&<div style={{background:"#140e03",border:"1px solid #2e1e07",borderRadius:10,padding:"10px 14px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:12,color:C.muted}}>Adds to daily target</span><span style={{fontFamily:"monospace",fontSize:18,fontWeight:800,color:C.orange}}>+{finalKcal} kcal</span></div>}<div style={{display:"flex",gap:8}}><button onClick={onClose} style={{flex:1,padding:"11px 0",borderRadius:10,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer"}}>Cancel</button><button onClick={confirm} disabled={!finalKcal} style={{flex:2,padding:"11px 0",borderRadius:10,background:finalKcal?C.lime:C.faint,color:"#000",fontWeight:700,border:"none",cursor:finalKcal?"pointer":"default",fontSize:15}}>Log Activity</button></div></Sheet>);
 }
 
 function CreatePrepSheet({products,onSave,onClose,apiKey}){
@@ -1835,15 +1854,15 @@ function TodayTab({dayData,setDayData,mealPreps,setMealPreps,products,setProduct
       {/* Daily steps — optional but recalculates target when set */}
       <div style={{marginBottom:12,background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-          <span style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}>Daily Steps</span>
-          {dailySteps>0&&stepsKcal(dailySteps,profile.activityLevel||"sedentary",latestWeight||70)>0&&<span style={{fontSize:10,color:C.orange,fontFamily:"monospace"}}>+{stepsKcal(dailySteps,profile.activityLevel||"sedentary",latestWeight||70)} kcal bonus</span>}
+          <span style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",display:"flex",alignItems:"center",gap:5}}>Daily Steps <InfoTip text="For background movement only — commuting, errands, walking around home. If you did a deliberate walk, log it as an Activity instead. Logging both double-counts."/></span>
+          {dailySteps>0&&(()=>{const adj=stepsKcal(dailySteps,profile.activityLevel||"sedentary",latestWeight||70);if(adj===0)return <span style={{fontSize:10,color:C.muted,fontFamily:"monospace"}}>on baseline</span>;return <span style={{fontSize:10,color:adj>0?C.orange:C.muted,fontFamily:"monospace"}}>{adj>0?"+":"−"}{Math.abs(adj)} kcal {adj>0?"bonus":"vs baseline"}</span>;})()}
         </div>
         <div style={{display:"flex",gap:6,alignItems:"center"}}>
           <input type="text" inputMode="numeric" pattern="[0-9]*" value={dailySteps||""} onChange={e=>{const v=parseInt(e.target.value.replace(/\D/g,""))||0;setDayData(p=>({...p,dailySteps:v}));}} placeholder="0" style={{width:90,background:C.bg,border:`1px solid ${C.border}`,borderRadius:7,padding:"7px 10px",color:C.text,fontSize:14,fontFamily:"monospace",fontWeight:700,outline:"none"}}/>
           <span style={{fontSize:11,color:C.muted}}>steps</span>
           <div style={{display:"flex",gap:5,marginLeft:"auto"}}>{[2000,5000,8000,10000].map(n=>(<button key={n} onClick={()=>setDayData(p=>({...p,dailySteps:n}))} style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${dailySteps===n?C.orange:C.border}`,background:dailySteps===n?`${C.orange}18`:C.bg,color:dailySteps===n?C.orange:C.muted,cursor:"pointer",fontSize:10,fontFamily:"monospace"}}>{n>=1000?`${n/1000}k`:n}</button>))}</div>
         </div>
-        {dailySteps>0&&<div style={{fontSize:10,color:C.muted,marginTop:5,lineHeight:1.4}}>Above-baseline steps add to your daily target. Set your base activity level in Settings to calibrate the bonus.</div>}
+        <div style={{fontSize:10,color:C.muted,marginTop:5,lineHeight:1.4}}>Your activity level ({ACT_LEVELS.find(l=>l.id===(profile.activityLevel||"sedentary"))?.label||"?"}) assumes ~{(STEP_BASELINE[profile.activityLevel||"sedentary"]||6500).toLocaleString()} steps/day. Logging your actual steps adjusts today's target up or down from there. Change your base level in Settings.</div>
       </div>
 
       {/* Macro rings */}
@@ -2484,7 +2503,16 @@ function HistoryTab({weights,products,profile}){
         // makes targetKcal=0 and the status falls back to a hardcoded "≥1600 = ✓" heuristic
         // which incorrectly shows green checkmarks even on big overshoots.
         const wForDay = dayWeight || weights[0]?.weight || profile?.targetWeightKg || 70;
-        const dayTarget = getDT(profile||{},log.dayType||"rest",wForDay,log.burnedExtra||0,(log.activities||[]).length>0,log.dailySteps||0);
+        // Bug fix #1: pass full activity burn (activities sum + burnedExtra) not just burnedExtra.
+        // getDT adds this to TDEE — without it a day with +409 kcal activity shows a lower target
+        // than the user actually had, making a good under-budget day appear red.
+        const fullActBurn = actKcal; // already = activities.reduce(kcal) + burnedExtra
+        // Bug fix #2: use the goal active ON THAT DAY to compute the deficit.
+        // Without this, switching goal retroactively recomputes all history targets with the new
+        // deficit (e.g. switching to cut makes old maintain days look like failed cut targets).
+        const historicalGoal = log.goalMode || profile?.goal || "cut";
+        const histProfile = {...(profile||{}), goal: historicalGoal};
+        const dayTarget = getDT(histProfile, log.dayType||"rest", wForDay, fullActBurn, (log.activities||[]).length>0, log.dailySteps||0);
         const targetKcal = dayTarget?.kcal || 0;
         // Status: how does today's intake compare to target, given the goal?
         // Margin: 150 kcal either side (cut: +150 OK, maintain: ±150 green, bulk: -150 OK)
@@ -2492,9 +2520,7 @@ function HistoryTab({weights,products,profile}){
         let status = "○", statusColor = C.muted;
         if (totals.kcal > 0 && targetKcal > 0) {
           const diff = totals.kcal - targetKcal;
-          // Use the goal that was active on this day if known (log.goalMode), so changing
-          // the profile goal later doesn't retroactively re-color old days.
-          const goal = log.goalMode || profile?.goal || "cut";
+          const goal = historicalGoal; // already locked to the goal active on that day
           if (goal === "cut") {
             if (diff <= 0) { status = "✓"; statusColor = C.lime; }
             else if (diff <= MARGIN) { status = "~"; statusColor = C.yellow; }
@@ -2539,7 +2565,7 @@ function HistoryTab({weights,products,profile}){
               <span style={{fontSize:11,color:C.muted,flexShrink:0}}>👣 Steps</span>
               <input type="text" inputMode="numeric" pattern="[0-9]*" value={log.dailySteps||""} onChange={e=>{const v=parseInt(e.target.value.replace(/\D/g,""))||0;updateLog(date,{...log,dailySteps:v});}} placeholder="0" style={{width:80,background:C.card,border:`1px solid ${C.border}`,borderRadius:6,padding:"5px 8px",color:C.text,fontSize:13,fontFamily:"monospace",fontWeight:700,outline:"none"}}/>
               <span style={{fontSize:10,color:C.muted}}>steps</span>
-              {(log.dailySteps||0)>0&&<span style={{fontSize:10,color:C.orange,fontFamily:"monospace",marginLeft:"auto"}}>+{stepsKcal(log.dailySteps,profile?.activityLevel||"sedentary",wForDay)}kcal</span>}
+              {(log.dailySteps||0)>0&&(()=>{const adj=stepsKcal(log.dailySteps,profile?.activityLevel||"sedentary",wForDay);return <span style={{fontSize:10,color:adj>0?C.orange:C.muted,fontFamily:"monospace",marginLeft:"auto"}}>{adj===0?"on baseline":`${adj>0?"+":"−"}${Math.abs(adj)}kcal`}</span>;})()}
             </div>
             <div style={{marginBottom:10}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Tags</div><div style={{display:"flex",flexWrap:"wrap",gap:5}}>{DAY_TAGS.map(tag=>{const active=(log.tags||[]).includes(tag.id);return(<button key={tag.id} onClick={()=>toggleTag(date,tag.id)} style={{padding:"5px 10px",borderRadius:20,border:`1px solid ${active?C.lime:C.border}`,background:active?`${C.lime}18`:C.bg,color:active?C.lime:C.muted,cursor:"pointer",fontSize:11}}>{tag.emoji} {tag.label}</button>);})}</div></div>
             <div style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}><span style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}>Meals ({log.meals?.length||0})</span><button onClick={()=>setAddMealDate(addMealDate===date?null:date)} style={{fontSize:11,color:C.lime,background:"none",border:`1px solid ${C.lime}`,borderRadius:6,padding:"3px 10px",cursor:"pointer",fontWeight:600}}>+ Add</button></div>{addMealDate===date&&<div style={{marginBottom:8}}><AddMealManual onAdd={meal=>addMeal(date,meal)} onCancel={()=>setAddMealDate(null)}/></div>}<div style={{display:"flex",flexDirection:"column",gap:6}}>{log.meals?.map(m=>{
