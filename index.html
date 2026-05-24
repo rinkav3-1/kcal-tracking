@@ -207,17 +207,42 @@ function getMaint(profile,dayType,weight,extraBurn=0,hasLoggedActivity=false,dai
 }
 // Trend over the last ~21 days (or up to 14 entries if you weigh more often).
 // Requires at least 4 entries spanning at least 3 days. Returns kg/week (negative = losing).
-function weeklyTrend(weights){
-  if(weights.length<4) return null;
+// Linear regression over a set of {date, weight} entries.
+// Returns kg/week (negative = losing weight).
+// Much more robust than start-minus-end: a flat period followed by a fast drop
+// no longer averages out to near-zero.
+function linRegTrend(entries) {
+  if (!entries || entries.length < 2) return null;
+  const xs = entries.map(e => new Date(e.date+"T12:00:00").getTime() / (7*24*3600*1000)); // weeks since epoch
+  const ys = entries.map(e => e.weight);
+  const n = xs.length;
+  const mx = xs.reduce((a,b)=>a+b,0)/n;
+  const my = ys.reduce((a,b)=>a+b,0)/n;
+  const ssXX = xs.reduce((a,x)=>a+(x-mx)**2,0);
+  const ssXY = xs.reduce((a,x,i)=>a+(x-mx)*(ys[i]-my),0);
+  if (ssXX === 0) return null;
+  return ssXY / ssXX; // kg per week
+}
+
+function weeklyTrend(weights) {
+  // Medium-term trend: last 21 days, min 4 entries, max 14 entries, linear regression.
+  if (weights.length < 2) return null;
   const cutoffMs = Date.now() - 21*24*3600*1000;
-  // Keep entries newer than the cutoff, fall back to the most recent 4 if too sparse.
-  let recent = weights.filter(w => new Date(w.date).getTime() >= cutoffMs);
-  if (recent.length < 4) recent = weights.slice(0, 4);
-  // Cap at 14 to avoid overweighting a dense run of weigh-ins.
+  let recent = weights.filter(w => new Date(w.date+"T12:00:00").getTime() >= cutoffMs);
+  if (recent.length < 4) recent = weights.slice(0, Math.min(weights.length, 8));
   recent = recent.slice(0, 14);
-  const days = (new Date(recent[0].date) - new Date(recent[recent.length-1].date)) / (24*3600*1000);
-  if(days<3) return null;
-  return((recent[0].weight - recent[recent.length-1].weight) / days) * 7;
+  if (recent.length < 2) return null;
+  return linRegTrend(recent);
+}
+
+function shortTrend(weights) {
+  // Short-term trend: last 7 days, min 2 entries, linear regression.
+  // Shown alongside weeklyTrend so user can see both recent pace and medium-term pace.
+  if (weights.length < 2) return null;
+  const cutoffMs = Date.now() - 7*24*3600*1000;
+  let recent = weights.filter(w => new Date(w.date+"T12:00:00").getTime() >= cutoffMs);
+  if (recent.length < 2) return null;
+  return linRegTrend(recent);
 }
 function gCol(goal){return goal==="cut"?C.orange:goal==="bulk"?C.blue:C.lime;}
 
@@ -2382,13 +2407,21 @@ function CoachPanel({profile, weights, products, mealPreps, weightPhases}) {
 
 function AnalysisTab({weights,profile,setProfile,progressPhotos,setProgressPhotos,products,mealPreps,weightPhases}){
   const [imgs,setImgs]=useState([]);const [analyzing,setAnalyzing]=useState(false);const [result,setResult]=useState(null);const [err,setErr]=useState(null);const [expanded,setExpanded]=useState(null);
-  const latestWeight=weights[0]?.weight;const trend=weeklyTrend(weights);const gc=gCol(profile.goal);
+  const latestWeight=weights[0]?.weight;
+  const trend=weeklyTrend(weights);       // 21-day linear regression
+  const trendShort=shortTrend(weights);   // 7-day linear regression
+  const gc=gCol(profile.goal);
   const spark=[...weights].reverse().slice(-20);const W=300,H=60;const vals=spark.map(w=>w.weight);const hasT=profile.targetWeightKg&&spark.length>1;const sMin=vals.length?Math.min(...vals,(hasT?profile.targetWeightKg:Infinity))-0.5:65;const sMax=vals.length?Math.max(...vals)+0.5:70;const px=i=>spark.length>1?(i/(spark.length-1))*W:W/2;const py=v=>H-((v-sMin)/(sMax-sMin))*(H-8)-4;
-  // weeksETA: only meaningful when trend is moving TOWARD the goal (opposite signs).
-  //   Cutting: kgToGoal > 0 (above target), trend < 0 (losing) → opposite signs = progress
-  //   Bulking: kgToGoal < 0 (below target), trend > 0 (gaining) → opposite signs = progress
-  // Same signs = trending away from goal, no meaningful ETA.
-  const startW=weights[weights.length-1]?.weight||latestWeight;const totalLost=startW&&latestWeight?startW-latestWeight:null;const kgToGoal=profile.targetWeightKg&&latestWeight?latestWeight-profile.targetWeightKg:null;const weeksETA=trend&&kgToGoal&&Math.sign(kgToGoal)!==Math.sign(trend)?Math.abs(kgToGoal/trend):null;const goalDate=weeksETA?new Date(Date.now()+weeksETA*7*24*3600*1000):null;const tdee=latestWeight?getTDEE(profile,latestWeight):null;
+  // ETA: prefer 7-day trend when it exists (most recent pace), fall back to 21-day.
+  // weeksETA only meaningful when trend moves TOWARD goal (opposite signs).
+  const startW=weights[weights.length-1]?.weight||latestWeight;
+  const totalLost=startW&&latestWeight?startW-latestWeight:null;
+  const kgToGoal=profile.targetWeightKg&&latestWeight?latestWeight-profile.targetWeightKg:null;
+  // Use short trend for ETA if available and moving toward goal, else fall back to medium trend
+  const etaTrend=(trendShort&&kgToGoal&&Math.sign(kgToGoal)!==Math.sign(trendShort))?trendShort:trend;
+  const weeksETA=etaTrend&&kgToGoal&&Math.sign(kgToGoal)!==Math.sign(etaTrend)?Math.abs(kgToGoal/etaTrend):null;
+  const goalDate=weeksETA?new Date(Date.now()+weeksETA*7*24*3600*1000):null;
+  const tdee=latestWeight?getTDEE(profile,latestWeight):null;
   const analyze=async()=>{if(!imgs.length)return;setAnalyzing(true);setErr(null);try{
     const res=await aAnalysis(imgs,profile,latestWeight,trend,profile.apiKey);
     setResult(res);
@@ -2401,7 +2434,12 @@ function AnalysisTab({weights,profile,setProfile,progressPhotos,setProgressPhoto
     <div style={{padding:"18px 0 12px"}}><div style={{fontSize:26,fontWeight:800,color:C.text,letterSpacing:"-0.03em"}}>Analysis</div></div>
     {latestWeight&&<div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"14px 16px",marginBottom:12}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-        <div><div style={{fontSize:11,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}>{profile.goal==="cut"?"Cutting":profile.goal==="bulk"?"Bulking":"Maintaining"}</div><div style={{display:"flex",alignItems:"baseline",gap:5,marginTop:4}}><span style={{fontSize:36,fontWeight:900,fontFamily:"monospace",color:C.text,letterSpacing:"-0.03em",lineHeight:1}}>{latestWeight.toFixed(2)}</span><span style={{fontSize:14,color:C.muted}}>kg</span>{trend!==null&&<span style={{fontSize:13,color:trend<0?C.lime:C.red,fontFamily:"monospace",marginLeft:4}}>{trend<0?"↓":"↑"}{Math.abs(trend).toFixed(2)}/wk</span>}</div></div>
+        <div><div style={{fontSize:11,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}>{profile.goal==="cut"?"Cutting":profile.goal==="bulk"?"Bulking":"Maintaining"}</div><div style={{display:"flex",alignItems:"baseline",gap:5,marginTop:4}}><span style={{fontSize:36,fontWeight:900,fontFamily:"monospace",color:C.text,letterSpacing:"-0.03em",lineHeight:1}}>{latestWeight.toFixed(2)}</span><span style={{fontSize:14,color:C.muted}}>kg</span></div>
+          <div style={{display:"flex",gap:10,marginTop:4,flexWrap:"wrap"}}>
+            {trendShort!==null&&<span style={{fontSize:11,color:trendShort<0?C.lime:C.red,fontFamily:"monospace"}}>{trendShort<0?"↓":"↑"}{Math.abs(trendShort).toFixed(2)}/wk <span style={{color:C.muted,fontSize:9}}>7d</span></span>}
+            {trend!==null&&<span style={{fontSize:11,color:trend<0?C.lime+"99":C.red+"99",fontFamily:"monospace"}}>{trend<0?"↓":"↑"}{Math.abs(trend).toFixed(2)}/wk <span style={{color:C.muted,fontSize:9}}>21d</span></span>}
+          </div>
+        </div>
         <div style={{textAlign:"right"}}>{totalLost!==null&&<div><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase"}}>Total {profile.goal==="bulk"?(totalLost<0?"gained":"lost"):(totalLost>0?"lost":"gained")}</div><div style={{fontSize:18,fontWeight:800,fontFamily:"monospace",color:(profile.goal==="bulk"?totalLost<0:totalLost>0)?C.lime:C.red}}>{(profile.goal==="bulk"?totalLost<0:totalLost>0)?"-":""}{Math.abs(totalLost).toFixed(2)}kg</div></div>}{tdee&&<div style={{marginTop:4}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase"}}>TDEE</div><div style={{fontSize:14,fontWeight:700,fontFamily:"monospace",color:C.blue}}>{tdee} kcal</div></div>}</div>
       </div>
       {spark.length>=3&&<svg width="100%" viewBox={"0 0 "+W+" "+H} style={{display:"block",marginBottom:8}}>
@@ -2410,7 +2448,7 @@ function AnalysisTab({weights,profile,setProfile,progressPhotos,setProgressPhoto
         <polyline points={spark.map((d,i)=>px(i)+","+py(d.weight)).join(" ")} fill="none" stroke={C.lime} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"/>
         <circle cx={px(spark.length-1)} cy={py(spark[spark.length-1].weight)} r={4} fill={C.lime}/>
       </svg>}
-      <div style={{display:"flex",gap:8}}>{kgToGoal!==null&&<div style={{flex:1,background:C.bg,borderRadius:8,padding:"8px 10px"}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase"}}>To goal</div><div style={{fontSize:18,fontWeight:800,fontFamily:"monospace",color:gc}}>{Math.abs(kgToGoal).toFixed(1)}kg</div></div>}{weeksETA&&goalDate?<div style={{flex:2,background:C.bg,borderRadius:8,padding:"8px 10px"}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase"}}>ETA</div><div style={{fontSize:14,fontWeight:700,color:gc}}>{goalDate.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}</div><div style={{fontSize:10,color:C.muted}}>~{Math.round(weeksETA)} weeks at current pace</div></div>:profile.targetWeightKg?(()=>{
+      <div style={{display:"flex",gap:8}}>{kgToGoal!==null&&<div style={{flex:1,background:C.bg,borderRadius:8,padding:"8px 10px"}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase"}}>To goal</div><div style={{fontSize:18,fontWeight:800,fontFamily:"monospace",color:gc}}>{Math.abs(kgToGoal).toFixed(1)}kg</div></div>}{weeksETA&&goalDate?<div style={{flex:2,background:C.bg,borderRadius:8,padding:"8px 10px"}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase"}}>ETA</div><div style={{fontSize:14,fontWeight:700,color:gc}}>{goalDate.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}</div><div style={{fontSize:10,color:C.muted}}>~{Math.round(weeksETA)} weeks · {etaTrend===trendShort?"7d":"21d"} pace ({etaTrend<0?"↓":"↑"}{Math.abs(etaTrend).toFixed(2)}/wk)</div></div>:profile.targetWeightKg?(()=>{
         // Fallback messages, in priority order
         const atGoal = kgToGoal !== null && Math.abs(kgToGoal) < 0.3;
         const notEnoughData = trend === null;
