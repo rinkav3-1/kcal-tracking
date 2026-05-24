@@ -259,7 +259,7 @@ async function resizeImg(dataUrl, maxPx=1024) {
 }
 async function prepImgs(imgs) {
   const out = [];
-  for (const img of imgs.slice(0, 8)) {
+  for (const img of imgs.slice(0, 20)) {
     const resized = await resizeImg(img.preview);
     out.push({ data: resized.split(",")[1], mt: "image/jpeg", preview: resized });
   }
@@ -1881,9 +1881,7 @@ function TodayTab({dayData,setDayData,mealPreps,setMealPreps,products,setProduct
       <div style={{marginBottom:12}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Tag today</div><div style={{display:"flex",flexWrap:"wrap",gap:5}}>{DAY_TAGS.map(tag=>{const active=(dayData.tags||[]).includes(tag.id);return(<button key={tag.id} onClick={()=>toggleTag(tag.id)} style={{padding:"5px 10px",borderRadius:20,border:`1px solid ${active?C.lime:C.border}`,background:active?`${C.lime}18`:C.bg,color:active?C.lime:C.muted,cursor:"pointer",fontSize:11}}>{tag.emoji} {tag.label}</button>);})}</div></div>
 
       {/* Active preps */}
-      {activePreps.length>0&&<div style={{marginBottom:12}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Active Preps</div><div style={{display:"flex",flexDirection:"column",gap:6}}>{activePreps.map(prep=><div key={prep.id} style={{background:C.card,border:`1px solid ${C.dim}`,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:13,fontWeight:600,color:C.text}}>{prep.name}</div><div style={{fontSize:10,color:C.muted,marginTop:2}}>{Math.round(prep.remainingWeightG??prep.totalWeightG??0)}g left · <span style={{fontFamily:"monospace",color:C.lime}}>~{prep.suggestedG||prep.portionWeightG}g/portion</span></div></div><button onClick={()=>setModal("meal")} style={{padding:"7px 13px",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Eat</button></div>)}</div></div>}
-
-      {/* Meals */}
+      {activePreps.length>0&&<div style={{marginBottom:12}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Active Preps</div><div style={{display:"flex",flexDirection:"column",gap:6}}>{activePreps.map(prep=>{const remGrams=Math.round(prep.remainingWeightG??prep.totalWeightG??0);const remPortions=Math.max(prep.remaining||1,1);const liveSuggested=remPortions>0?Math.round(remGrams/remPortions):0;return(<div key={prep.id} style={{background:C.card,border:`1px solid ${C.dim}`,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:13,fontWeight:600,color:C.text}}>{prep.name}</div><div style={{fontSize:10,color:C.muted,marginTop:2}}>{remGrams}g left · {remPortions} portion{remPortions!==1?"s":""} · <span style={{fontFamily:"monospace",color:C.lime}}>~{liveSuggested}g each</span></div></div><button onClick={()=>setModal("meal")} style={{padding:"7px 13px",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Eat</button></div>);})}</div></div>}
       <div><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>{dayData.meals.length} meals</div>
         <div style={{display:"flex",flexDirection:"column",gap:7}}>
           {dayData.meals.map(m=>{
