@@ -284,7 +284,7 @@ async function resizeImg(dataUrl, maxPx=1024) {
 }
 async function prepImgs(imgs) {
   const out = [];
-  for (const img of imgs.slice(0, 20)) {
+  for (const img of imgs.slice(0, 15)) {
     const resized = await resizeImg(img.preview);
     out.push({ data: resized.split(",")[1], mt: "image/jpeg", preview: resized });
   }
@@ -439,7 +439,7 @@ async function aFood(imgs, ps, mt, desc, apiKey) {
       + "  • Single-serve item with NO scale photo → use package size only if plausibly eaten whole.\n\n"
       + "OTHER RULES:\n"
       + "1. DESCRIPTION PRIORITY: if the description names a specific product or flavour, match it EXACTLY from known products list.\n"
-      + "2. Identify EVERY ingredient across ALL " + compressed.length + " photos. Skip none — small items like syrups, oils, sweeteners count.\n"
+      + "2. Identify EVERY ingredient across ALL " + compressed.length + " photos. You may have up to 15 ingredients — count carefully and skip none. Small additions like syrups, oils, sweeteners, nuts, seeds, sauces still count.\n"
       + "3. Per ingredient: kcal/protein/carbs/fat MUST be PER-100g reference values for that ingredient (NOT scaled to weight). If matched to a known product, copy its per-100g values exactly. If not matched, give standard reference per-100g values for that food.\n"
       + "4. Top-level kcal/protein/carbs/fat = meal totals (already scaled): sum of (per-100g × weightG / 100). totalGrams = sum of weightG.\n"
       + "5. Unknown product: if label visible in photo, read it and populate newProduct with brand name and per-100g macros.\n"
@@ -484,7 +484,7 @@ async function aPrep(imgs, ps, desc, apiKey) {
       + "  • PACKAGE WEIGHT (e.g. '180g pack', '450g net weight') = package SIZE, NOT what was used. Don't copy that into weightG when a scale exists.\n"
       + "  • Use printed package weight as consumed amount only when there's no scale AND it's a single-serve item.\n\n"
       + "OTHER RULES:\n"
-      + "1. List EVERY ingredient that appears on a scale across ALL " + c.length + " photos. Count them carefully — small additions like syrups, oils, sweeteners, nuts, seeds, sauces still count. Do not skip any.\n"
+      + "1. List EVERY ingredient that appears on a scale across ALL " + c.length + " photos. You may have up to 15 ingredients — count them carefully. Small additions like syrups, oils, sweeteners, nuts, seeds, sauces still count. Do not skip any.\n"
       + "2. The kcal/protein/carbs/fat fields you return MUST be PER-100g reference values for that ingredient (NOT per-serving, NOT scaled to the weight). If you matched a known product, copy its per-100g values exactly.\n"
       + "3. totalKcal/totalProtein/totalCarbs/totalFat at the top level ARE the meal totals (already scaled): sum of (per-100g × weightG / 100) across all ingredients.\n"
       + "4. estimatedWeightG = sum of all ingredient weightG.\n"
@@ -684,7 +684,7 @@ function MacroFields({form,setForm}){
 }
 // ── Inline edit components ────────────────────────────────────────────────────
 function EditMealInline({meal,onSave,onCancel,products,apiKey}){
-  const [ings,setIngs]=useState(meal.ingredients||null);
+  const [ings,setIngs]=useState(meal.ingredients?.length?meal.ingredients:null);
   const [form,setForm]=useState({name:meal.name,kcal:String(meal.kcal),protein:String(meal.protein),carbs:String(meal.carbs),fat:String(meal.fat),notes:meal.notes||""});
   const [ingMode,setIngMode]=useState(!!meal.ingredients?.length);
   const [mealType,setMealType]=useState(meal.mealType||"snack");
@@ -698,7 +698,7 @@ function EditMealInline({meal,onSave,onCancel,products,apiKey}){
   </div>);
   if(ingMode&&ings){
     return(<div style={{background:C.faint,borderRadius:10,padding:"12px"}}>
-      <div style={{fontSize:11,color:C.muted,marginBottom:6}}>Editing meal · adjust per-ingredient</div>
+      <div style={{fontSize:11,color:C.muted,marginBottom:6}}>Editing per-ingredient</div>
       {typeRow}
       <input value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} placeholder="Meal name" style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,outline:"none",marginBottom:10,fontWeight:600}}/>
       <IngredientConfirmPanel ingredients={ings} setIngredients={setIngs} products={products||[]} apiKey={apiKey} confirmLabel="Save Changes" onSkip={onCancel} onConfirm={(updated,totals)=>{
@@ -710,7 +710,14 @@ function EditMealInline({meal,onSave,onCancel,products,apiKey}){
   }
   return(<div style={{background:C.faint,borderRadius:10,padding:"12px 12px 10px"}}>
     {typeRow}
-    {meal.ingredients?.length>0&&<button onClick={()=>setIngMode(true)} style={{width:"100%",marginBottom:8,padding:"7px 0",borderRadius:6,background:C.lime+"15",border:`1px solid ${C.lime}40`,color:C.lime,fontSize:11,fontWeight:600,cursor:"pointer"}}>← Edit per-ingredient</button>}
+    <button onClick={()=>{
+      // If ingredients exist, go straight to editing them.
+      // If not, seed one row from the current meal so user has a starting point.
+      if(!ings||ings.length===0){
+        setIngs([{name:form.name||meal.name,weightG:"100",kcal:parseFloat(form.kcal)||0,protein:parseFloat(form.protein)||0,carbs:parseFloat(form.carbs)||0,fat:parseFloat(form.fat)||0}]);
+      }
+      setIngMode(true);
+    }} style={{width:"100%",marginBottom:8,padding:"7px 0",borderRadius:6,background:`${C.blue}12`,border:`1px solid ${C.blue}40`,color:C.blue,fontSize:11,fontWeight:600,cursor:"pointer"}}>{ings?.length?"← Edit per-ingredient":"🧪 Switch to ingredient editing"}</button>
     <MacroFields form={form} setForm={setForm}/>
     <div style={{display:"flex",gap:7,marginTop:10}}>
       <button onClick={onCancel} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer",fontSize:12}}>Cancel</button>
@@ -1058,7 +1065,7 @@ function IngredientConfirmPanel({ingredients, setIngredients, products, onConfir
             <input value={addSearch} onChange={e=>setAddSearch(e.target.value)} placeholder="Search labels…" style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,outline:"none",marginBottom:7}} autoFocus/>
             <div style={{display:"flex",flexDirection:"column",gap:5,maxHeight:200,overflowY:"auto"}}>
               {(products||[]).filter(p=>!addSearch||p.name.toLowerCase().includes(addSearch.toLowerCase())).slice(0,12).map(prod=>(
-                <button key={prod.name} type="button" onClick={()=>{setAddPickedProd(prod);setAddPickedG("100");}} style={{padding:"7px 11px",borderRadius:7,background:C.card,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
+                <button key={prod.name} type="button" onClick={()=>{setAddPickedProd(prod);setAddPickedG(prod.wholeOnly&&prod.packageG?String(prod.packageG):"100");}} style={{padding:"7px 11px",borderRadius:7,background:C.card,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
                   <span style={{fontSize:12,color:C.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{prod.name}</span>
                   <span style={{fontFamily:"monospace",fontSize:10,color:C.muted,flexShrink:0,marginLeft:8}}>{prod.kcal}k {prod.p}P</span>
                 </button>
@@ -1369,7 +1376,7 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose,products,
           <input value={pickSearch} onChange={e=>setPickSearch(e.target.value)} placeholder="Search your product labels…" style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,outline:"none",marginBottom:7}} autoFocus/>
           <div style={{display:"flex",flexDirection:"column",gap:5,maxHeight:240,overflowY:"auto"}}>
             {(products||[]).filter(p=>!pickSearch||p.name.toLowerCase().includes(pickSearch.toLowerCase())).slice(0,15).map(prod=>(
-              <button key={prod.name} type="button" onClick={()=>{setPickedProd(prod);setPickedG("100");}} style={{padding:"8px 11px",borderRadius:7,background:C.card,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
+              <button key={prod.name} type="button" onClick={()=>{setPickedProd(prod);setPickedG(prod.wholeOnly&&prod.packageG?String(prod.packageG):"100");}} style={{padding:"8px 11px",borderRadius:7,background:C.card,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
                 <span style={{fontSize:12,color:C.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{prod.name}</span>
                 <span style={{fontFamily:"monospace",fontSize:10,color:C.muted,flexShrink:0,marginLeft:8}}>{prod.kcal}k {prod.p}P</span>
               </button>
@@ -1377,8 +1384,10 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose,products,
             {(products||[]).filter(p=>!pickSearch||p.name.toLowerCase().includes(pickSearch.toLowerCase())).length===0&&<div style={{fontSize:11,color:C.muted,padding:"4px 0"}}>No labels match.</div>}
           </div>
         </>):(<div>
-          <div style={{fontSize:12,color:C.lime,marginBottom:7,fontWeight:600}}>{pickedProd.name}</div>
+          <div style={{fontSize:12,color:C.lime,marginBottom:4,fontWeight:600}}>{pickedProd.name}</div>
           <div style={{fontSize:10,color:C.muted,marginBottom:6,fontFamily:"monospace"}}>{pickedProd.kcal} kcal · {pickedProd.p}g P · {pickedProd.c}g C · {pickedProd.f}g F per 100g</div>
+          {pickedProd.wholeOnly&&pickedProd.packageG&&<div style={{fontSize:10,color:C.lime,marginBottom:6,fontStyle:"italic"}}>🔒 Always eaten whole — defaults to {pickedProd.packageG}g</div>}
+          {pickedProd.packageG&&!pickedProd.wholeOnly&&<div style={{fontSize:10,color:C.muted,marginBottom:6}}>Package: {pickedProd.packageG}g <button type="button" onClick={()=>setPickedG(String(pickedProd.packageG))} style={{background:"none",border:`1px solid ${C.border}`,color:C.lime,fontSize:9,cursor:"pointer",padding:"1px 6px",borderRadius:4,marginLeft:4}}>use full pack</button></div>}
           <div style={{display:"flex",gap:7,alignItems:"center"}}>
             <input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={pickedG} onChange={e=>setPickedG(e.target.value.replace(",","."))} placeholder="100" style={{width:70,background:C.bg,border:`1px solid ${C.lime}`,borderRadius:6,padding:"6px 9px",color:C.lime,fontSize:14,fontFamily:"monospace",fontWeight:700,outline:"none"}}/>
             <span style={{fontSize:11,color:C.muted}}>g</span>
@@ -1436,14 +1445,19 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose,products,
   </div>);
 }
 
-function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
-  const [mode,setMode]=useState("photos");const [mt,setMt]=useState("home");const [desc,setDesc]=useState("");const [imgs,setImgs]=useState([]);const [result,setResult]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState(null);const [form,setForm]=useState({name:"",kcal:"",protein:"",carbs:"",fat:"",notes:""});const [mealType,setMealType]=useState("breakfast");const [gramsEaten,setGramsEaten]=useState("");const [per100,setPer100]=useState(null);const [aiNotes,setAiNotes]=useState("");
+function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey,initialMode}){
+  const [mode,setMode]=useState(initialMode||"photos");const [mt,setMt]=useState("home");const [desc,setDesc]=useState("");const [imgs,setImgs]=useState([]);const [result,setResult]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState(null);const [form,setForm]=useState({name:"",kcal:"",protein:"",carbs:"",fat:"",notes:""});const [mealType,setMealType]=useState("breakfast");const [gramsEaten,setGramsEaten]=useState("");const [per100,setPer100]=useState(null);const [aiNotes,setAiNotes]=useState("");
   // Manual-mode label picker state: build a meal from one or more label entries
   const [manualLabels,setManualLabels]=useState([]); // [{id, name, weightG, kcal, protein, carbs, fat}]
   const [mPickOpen,setMPickOpen]=useState(false);
   const [mPickSearch,setMPickSearch]=useState("");
   const [mPickedProd,setMPickedProd]=useState(null);
   const [mPickedG,setMPickedG]=useState("");
+  // Dedicated labels-only mode state (issue 2)
+  const [lblSearch,setLblSearch]=useState("");
+  const [lblPicked,setLblPicked]=useState(null);
+  const [lblG,setLblG]=useState("");
+  const [lblItems,setLblItems]=useState([]); // [{id,name,weightG,kcal,protein,carbs,fat}]
   const activePreps=mealPreps.filter(p=>p.remaining>0);
   const [ingredients,setIngredients]=useState(null); // detected ingredients for confirmation
   const [ingConfirmed,setIngConfirmed]=useState(false); // when true, ingredients exist but user has moved past panel
@@ -1516,18 +1530,66 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey}){
   const usePrep=prep=>{const n=prep.portions-prep.remaining+1;onAdd({id:Date.now(),name:prep.name,kcal:prep.perKcal,protein:prep.perProtein,carbs:prep.perCarbs,fat:prep.perFat,notes:`Prep ${n}/${prep.portions}`,time:new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})});setMealPreps(ps=>ps.map(p=>p.id===prep.id?{...p,remaining:p.remaining-1}:p));};
   const canAnalyze=!loading&&imgs.length>0&&(mt==="canteen"?desc.trim().length>5:true);
   return(<Sheet onClose={onClose} title="Log Meal">
-    <div style={{display:"flex",gap:6,marginBottom:10}}>{[["📸 Photos","photos"],["✏️ Manual","manual"],["🍱 Prep","mealprep"]].map(([lbl,m])=>(<button key={m} onClick={()=>{setMode(m);setResult(null);}} style={{flex:1,padding:"8px 4px",borderRadius:10,border:`1px solid ${mode===m?C.lime:C.border}`,background:mode===m?`${C.lime}20`:C.card,color:mode===m?C.lime:C.muted,fontWeight:mode===m?700:500,cursor:"pointer",fontSize:12}}>{lbl}</button>))}</div>
+    <div style={{display:"flex",gap:5,marginBottom:10,flexWrap:"wrap"}}>{[["📸 Photos","photos"],["🏷️ Labels","labels"],["✏️ Manual","manual"],["🍱 Prep","mealprep"]].map(([lbl,m])=>(<button key={m} onClick={()=>{setMode(m);setResult(null);}} style={{flex:1,minWidth:60,padding:"8px 4px",borderRadius:10,border:`1px solid ${mode===m?C.lime:C.border}`,background:mode===m?`${C.lime}20`:C.card,color:mode===m?C.lime:C.muted,fontWeight:mode===m?700:500,cursor:"pointer",fontSize:11}}>{lbl}</button>))}</div>
     <div style={{marginBottom:14}}>
       <div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Meal type</div>
       <div style={{display:"flex",gap:5}}>{[["🌅","breakfast","Breakfast"],["☀️","lunch","Lunch"],["🌙","dinner","Dinner"],["🍎","snack","Snack"],["🥤","drink","Drink"]].map(([ic,id,lbl])=>{const active=mealType===id;return(<button key={id} onClick={()=>setMealType(id)} style={{flex:1,padding:"6px 2px",borderRadius:8,border:`1px solid ${active?C.lime:C.border}`,background:active?`${C.lime}18`:C.bg,color:active?C.lime:C.muted,fontWeight:active?700:400,cursor:"pointer",fontSize:9,lineHeight:1.5,textAlign:"center"}}><div style={{fontSize:13}}>{ic}</div><div>{lbl}</div></button>);})}</div>
     </div>
+    {/* ── Labels mode (issue 2) ── */}
+    {mode==="labels"&&(<div>
+      {lblItems.length>0&&<div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:10}}>
+        {lblItems.map((lab,i)=>(<div key={lab.id} style={{background:C.faint,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 11px",display:"flex",alignItems:"center",gap:8}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:12,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>🏷️ {lab.name}</div>
+            <div style={{display:"flex",gap:8,marginTop:2,fontFamily:"monospace"}}>
+              <span style={{fontSize:10,color:C.muted}}>{Math.round(lab.weightG)}g</span>
+              <span style={{fontSize:10,color:C.lime}}>{Math.round(lab.kcal)}k</span>
+              <span style={{fontSize:10,color:C.blue}}>{Math.round(lab.protein*10)/10}P</span>
+              <span style={{fontSize:10,color:C.orange}}>{Math.round(lab.carbs*10)/10}C</span>
+              <span style={{fontSize:10,color:C.purple}}>{Math.round(lab.fat*10)/10}F</span>
+            </div>
+          </div>
+          <button onClick={()=>setLblItems(p=>p.filter((_,j)=>j!==i))} style={{background:"none",border:"none",color:C.faint,fontSize:16,cursor:"pointer",lineHeight:1}}>×</button>
+        </div>))}
+      </div>}
+      {!lblPicked?(<>
+        <input value={lblSearch} onChange={e=>setLblSearch(e.target.value)} placeholder="Search labels (protein bar, oats…)" style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 11px",color:C.text,fontSize:13,outline:"none",marginBottom:7}}/>
+        <div style={{display:"flex",flexDirection:"column",gap:5,maxHeight:260,overflowY:"auto"}}>
+          {(products||[]).filter(p=>!lblSearch||p.name.toLowerCase().includes(lblSearch.toLowerCase())).slice(0,20).map(prod=>(
+            <button key={prod.name} type="button" onClick={()=>{setLblPicked(prod);setLblG(prod.wholeOnly&&prod.packageG?String(prod.packageG):"");}} style={{padding:"8px 11px",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
+              <span style={{fontSize:12,color:C.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{prod.name}</span>
+              <span style={{fontFamily:"monospace",fontSize:10,color:C.muted,flexShrink:0,marginLeft:8}}>{prod.kcal}k {prod.p}P</span>
+            </button>
+          ))}
+          {products.filter(p=>!lblSearch||p.name.toLowerCase().includes(lblSearch.toLowerCase())).length===0&&<div style={{fontSize:11,color:C.muted,padding:"4px 0"}}>No labels match.</div>}
+        </div>
+      </>):(<div style={{background:C.faint,borderRadius:10,padding:"12px 14px"}}>
+        <div style={{fontSize:13,fontWeight:700,color:C.lime,marginBottom:3}}>{lblPicked.name}</div>
+        <div style={{fontSize:10,color:C.muted,marginBottom:6,fontFamily:"monospace"}}>{lblPicked.kcal} kcal · {lblPicked.p}g P · {lblPicked.c}g C · {lblPicked.f}g F per 100g</div>
+        {lblPicked.wholeOnly&&lblPicked.packageG&&<div style={{fontSize:10,color:C.lime,marginBottom:6,fontStyle:"italic"}}>🔒 Always eaten whole — {lblPicked.packageG}g</div>}
+        {lblPicked.packageG&&!lblPicked.wholeOnly&&<div style={{fontSize:10,color:C.muted,marginBottom:6}}>Package: {lblPicked.packageG}g <button type="button" onClick={()=>setLblG(String(lblPicked.packageG))} style={{background:"none",border:`1px solid ${C.border}`,color:C.lime,fontSize:9,cursor:"pointer",padding:"1px 6px",borderRadius:4,marginLeft:4}}>use full</button></div>}
+        <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+          <input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={lblG} onChange={e=>setLblG(e.target.value.replace(",","."))} placeholder="grams" autoFocus style={{width:80,background:C.bg,border:`1px solid ${C.lime}`,borderRadius:7,padding:"7px 9px",color:C.lime,fontSize:15,fontFamily:"monospace",fontWeight:700,outline:"none"}}/>
+          <span style={{fontSize:11,color:C.muted}}>g</span>
+          {(()=>{const g=parseFloat(lblG)||0;const s=g/100;return g>0&&<div style={{display:"flex",gap:8,marginLeft:"auto"}}><Chip val={Math.round(lblPicked.kcal*s)} label="k" color={C.lime}/><Chip val={Math.round(lblPicked.p*s*10)/10} label="P" color={C.blue}/><Chip val={Math.round(lblPicked.c*s*10)/10} label="C" color={C.orange}/><Chip val={Math.round(lblPicked.f*s*10)/10} label="F" color={C.purple}/></div>})()}
+        </div>
+        <div style={{display:"flex",gap:7}}>
+          <button onClick={()=>{setLblPicked(null);setLblG("");}} style={{flex:1,padding:"8px 0",borderRadius:8,background:"none",border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:12}}>← Back</button>
+          <button onClick={()=>{const g=parseFloat(lblG)||0;if(!g)return;const s=g/100;setLblItems(p=>[...p,{id:Date.now(),name:lblPicked.name,weightG:g,kcal:lblPicked.kcal*s,protein:lblPicked.p*s,carbs:lblPicked.c*s,fat:lblPicked.f*s}]);setLblPicked(null);setLblG("");setLblSearch("");}} disabled={!parseFloat(lblG)} style={{flex:2,padding:"8px 0",borderRadius:8,background:parseFloat(lblG)?C.lime:C.faint,border:"none",color:"#000",fontWeight:700,cursor:parseFloat(lblG)?"pointer":"default",fontSize:13}}>+ Add</button>
+        </div>
+      </div>)}
+      {lblItems.length>0&&!lblPicked&&(()=>{const tot=lblItems.reduce((a,b)=>({kcal:a.kcal+b.kcal,protein:a.protein+b.protein,carbs:a.carbs+b.carbs,fat:a.fat+b.fat}),{kcal:0,protein:0,carbs:0,fat:0});return(<div style={{marginTop:10}}>
+        <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 12px",marginBottom:8,display:"flex",gap:12}}><Chip val={Math.round(tot.kcal)} label=" kcal" color={C.lime}/><Chip val={Math.round(tot.protein*10)/10} label="P" color={C.blue}/><Chip val={Math.round(tot.carbs*10)/10} label="C" color={C.orange}/><Chip val={Math.round(tot.fat*10)/10} label="F" color={C.purple}/></div>
+        <button onClick={()=>{const tot=lblItems.reduce((a,b)=>({kcal:a.kcal+b.kcal,protein:a.protein+b.protein,carbs:a.carbs+b.carbs,fat:a.fat+b.fat}),{kcal:0,protein:0,carbs:0,fat:0});const name=lblItems.length===1?lblItems[0].name:lblItems.map(l=>l.name.split(" ")[0]).join(" + ");const ings=lblItems.map(l=>({name:l.name,weightG:String(Math.round(l.weightG)),kcal:l.kcal/l.weightG*100,protein:l.protein/l.weightG*100,carbs:l.carbs/l.weightG*100,fat:l.fat/l.weightG*100}));onAdd({id:Date.now(),mealType,name,kcal:Math.round(tot.kcal),protein:Math.round(tot.protein*10)/10,carbs:Math.round(tot.carbs*10)/10,fat:Math.round(tot.fat*10)/10,ingredients:ings,notes:lblItems.map(l=>l.name+" "+Math.round(l.weightG)+"g").join(", "),time:new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})});}} style={{width:"100%",padding:"12px 0",borderRadius:10,background:C.lime,color:"#000",fontWeight:800,border:"none",cursor:"pointer",fontSize:15}}>Log Meal ({lblItems.length} item{lblItems.length!==1?"s":""})</button>
+      </div>);})()}
+    </div>)}
     {mode==="photos"&&!result&&(<>
       <div style={{display:"flex",gap:6,marginBottom:10}}>{[["Home cooked","home"],["Canteen / Restaurant","canteen"]].map(([lbl,t])=>(<button key={t} onClick={()=>setMt(t)} style={{flex:1,padding:"8px 6px",borderRadius:8,border:`1px solid ${mt===t?C.lime:C.border}`,background:mt===t?`${C.lime}12`:C.bg,color:mt===t?C.lime:C.muted,fontWeight:mt===t?600:400,cursor:"pointer",fontSize:11}}>{lbl}</button>))}</div>
       <div style={{marginBottom:10}}>
         <div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:4}}>{mt==="canteen"?"Describe the meal (required)":"Meal name / description (optional)"}</div>
         <textarea value={desc} onChange={e=>setDesc(e.target.value)} rows={2} placeholder={mt==="canteen"?"e.g. Grilled chicken ~150g, buckwheat, salad, butter sauce on side":"e.g. Overnight oats with banana and peanut butter"} style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 11px",color:C.text,fontSize:13,outline:"none",resize:"none",fontFamily:"inherit"}}/>
       </div>
-      <ImgZone imgs={imgs} setImgs={setImgs} maxPhotos={10}/>
+      <ImgZone imgs={imgs} setImgs={setImgs} maxPhotos={15}/>
       {err&&<div style={{background:"#1e0a0a",border:"1px solid #5a1a1a",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#ff8080",margin:"8px 0",wordBreak:"break-word"}}>{err}</div>}
       <button onClick={analyze} disabled={!canAnalyze} style={{width:"100%",padding:"12px 0",borderRadius:10,background:canAnalyze?C.lime:C.faint,color:"#000",fontWeight:700,border:"none",cursor:canAnalyze?"pointer":"default",fontSize:15,marginTop:10}}>
         {loading?"Analyzing…":mt==="canteen"?"Estimate Meal":`Analyze ${imgs.length} photo${imgs.length!==1?"s":""}`}
@@ -1721,7 +1783,7 @@ function CreatePrepSheet({products,onSave,onClose,apiKey}){
 
     {/* Photos — optional now */}
     <div style={{marginBottom:4,fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}>Photos (optional — AI can estimate from description alone)</div>
-    <ImgZone imgs={imgs} setImgs={setImgs} maxPhotos={10}/>
+    <ImgZone imgs={imgs} setImgs={setImgs} maxPhotos={15}/>
 
     {/* Description */}
     <div style={{marginTop:10}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:4}}>Description <span style={{textTransform:"none",color:C.lime}}>← describe ingredients + weights for accurate AI estimate</span></div><textarea value={desc} onChange={e=>setDesc(e.target.value)} rows={3} placeholder={"e.g. 400g cooked chicken breast\nor: 500g raw chicken, 200g dry rice, 80g peas, 30ml soy sauce\nor: homemade cheesecake, 200g cream cheese, 150g biscuits, 50g butter"} style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 11px",color:C.text,fontSize:13,outline:"none",resize:"none",fontFamily:"inherit"}}/></div>
@@ -1751,7 +1813,7 @@ function CreatePrepSheet({products,onSave,onClose,apiKey}){
         <input value={pickSearch} onChange={e=>setPickSearch(e.target.value)} placeholder="Search labels (chicken, rice, oats…)" style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,outline:"none",marginBottom:7}}/>
         <div style={{display:"flex",flexDirection:"column",gap:5,maxHeight:220,overflowY:"auto"}}>
           {(products||[]).filter(p=>!pickSearch||p.name.toLowerCase().includes(pickSearch.toLowerCase())).slice(0,15).map(prod=>(
-            <button key={prod.name} type="button" onClick={()=>{setPickedProd(prod);setPickedG("100");}} style={{padding:"8px 11px",borderRadius:7,background:C.bg,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
+            <button key={prod.name} type="button" onClick={()=>{setPickedProd(prod);setPickedG(prod.wholeOnly&&prod.packageG?String(prod.packageG):"100");}} style={{padding:"8px 11px",borderRadius:7,background:C.bg,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
               <span style={{fontSize:12,color:C.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{prod.name}</span>
               <span style={{fontFamily:"monospace",fontSize:10,color:C.muted,flexShrink:0,marginLeft:8}}>{prod.kcal}k {prod.p}P</span>
             </button>
@@ -1759,8 +1821,10 @@ function CreatePrepSheet({products,onSave,onClose,apiKey}){
           {(products||[]).filter(p=>!pickSearch||p.name.toLowerCase().includes(pickSearch.toLowerCase())).length===0&&<div style={{fontSize:11,color:C.muted,padding:"4px 0"}}>No labels match — add the product in Food tab first.</div>}
         </div>
       </>):(<div>
-        <div style={{fontSize:12,color:C.lime,marginBottom:7,fontWeight:600}}>{pickedProd.name}</div>
+        <div style={{fontSize:12,color:C.lime,marginBottom:4,fontWeight:600}}>{pickedProd.name}</div>
         <div style={{fontSize:10,color:C.muted,marginBottom:6,fontFamily:"monospace"}}>{pickedProd.kcal} kcal · {pickedProd.p}g P · {pickedProd.c}g C · {pickedProd.f}g F per 100g</div>
+        {pickedProd.wholeOnly&&pickedProd.packageG&&<div style={{fontSize:10,color:C.lime,marginBottom:6,fontStyle:"italic"}}>🔒 Always eaten whole — defaults to {pickedProd.packageG}g</div>}
+        {pickedProd.packageG&&!pickedProd.wholeOnly&&<div style={{fontSize:10,color:C.muted,marginBottom:6}}>Package: {pickedProd.packageG}g <button type="button" onClick={()=>setPickedG(String(pickedProd.packageG))} style={{background:"none",border:`1px solid ${C.border}`,color:C.lime,fontSize:9,cursor:"pointer",padding:"1px 6px",borderRadius:4,marginLeft:4}}>use full pack</button></div>}
         <div style={{display:"flex",gap:7,alignItems:"center"}}>
           <input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={pickedG} onChange={e=>setPickedG(e.target.value.replace(",","."))} placeholder="100" style={{width:80,background:C.bg,border:`1px solid ${C.lime}`,borderRadius:6,padding:"6px 9px",color:C.lime,fontSize:14,fontFamily:"monospace",fontWeight:700,outline:"none"}} autoFocus/>
           <span style={{fontSize:11,color:C.muted}}>g (raw/dry)</span>
@@ -1906,7 +1970,7 @@ function TodayTab({dayData,setDayData,mealPreps,setMealPreps,products,setProduct
       <div style={{marginBottom:12}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Tag today</div><div style={{display:"flex",flexWrap:"wrap",gap:5}}>{DAY_TAGS.map(tag=>{const active=(dayData.tags||[]).includes(tag.id);return(<button key={tag.id} onClick={()=>toggleTag(tag.id)} style={{padding:"5px 10px",borderRadius:20,border:`1px solid ${active?C.lime:C.border}`,background:active?`${C.lime}18`:C.bg,color:active?C.lime:C.muted,cursor:"pointer",fontSize:11}}>{tag.emoji} {tag.label}</button>);})}</div></div>
 
       {/* Active preps */}
-      {activePreps.length>0&&<div style={{marginBottom:12}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Active Preps</div><div style={{display:"flex",flexDirection:"column",gap:6}}>{activePreps.map(prep=>{const remGrams=Math.round(prep.remainingWeightG??prep.totalWeightG??0);const remPortions=Math.max(prep.remaining||1,1);const liveSuggested=remPortions>0?Math.round(remGrams/remPortions):0;return(<div key={prep.id} style={{background:C.card,border:`1px solid ${C.dim}`,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:13,fontWeight:600,color:C.text}}>{prep.name}</div><div style={{fontSize:10,color:C.muted,marginTop:2}}>{remGrams}g left · {remPortions} portion{remPortions!==1?"s":""} · <span style={{fontFamily:"monospace",color:C.lime}}>~{liveSuggested}g each</span></div></div><button onClick={()=>setModal("meal")} style={{padding:"7px 13px",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Eat</button></div>);})}</div></div>}
+      {activePreps.length>0&&<div style={{marginBottom:12}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Active Preps</div><div style={{display:"flex",flexDirection:"column",gap:6}}>{activePreps.map(prep=>{const remGrams=Math.round(prep.remainingWeightG??prep.totalWeightG??0);const remPortions=Math.max(prep.remaining||1,1);const liveSuggested=remPortions>0?Math.round(remGrams/remPortions):0;return(<div key={prep.id} style={{background:C.card,border:`1px solid ${C.dim}`,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:13,fontWeight:600,color:C.text}}>{prep.name}</div><div style={{fontSize:10,color:C.muted,marginTop:2}}>{remGrams}g left · {remPortions} portion{remPortions!==1?"s":""} · <span style={{fontFamily:"monospace",color:C.lime}}>~{liveSuggested}g each</span></div></div><button onClick={()=>setModal("mealprep")} style={{padding:"7px 13px",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Eat</button></div>);})}</div></div>}
       <div><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>{dayData.meals.length} meals</div>
         <div style={{display:"flex",flexDirection:"column",gap:7}}>
           {dayData.meals.map(m=>{
@@ -1945,7 +2009,7 @@ function TodayTab({dayData,setDayData,mealPreps,setMealPreps,products,setProduct
       </div>
     </div>
     <button onClick={()=>setModal("meal")} style={{position:"absolute",bottom:16,right:16,width:54,height:54,borderRadius:"50%",background:C.lime,border:"none",cursor:"pointer",fontSize:28,color:"#000",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 0 20px ${C.lime}55`,zIndex:10}}>+</button>
-    {modal==="meal"&&<AddMealSheet products={products} mealPreps={mealPreps} setMealPreps={setMealPreps} onAdd={handleAdd} onClose={()=>setModal(null)} apiKey={profile.apiKey}/>}
+    {(modal==="meal"||modal==="mealprep")&&<AddMealSheet products={products} mealPreps={mealPreps} setMealPreps={setMealPreps} onAdd={handleAdd} onClose={()=>setModal(null)} apiKey={profile.apiKey} initialMode={modal==="mealprep"?"mealprep":"photos"}/>}
   </div>);
 }
 
@@ -2179,7 +2243,10 @@ function FoodTab({mealPreps,setMealPreps,products,setProducts,profile}){
     const t=setTimeout(()=>setSaveToast(null),4000);
     return ()=>clearTimeout(t);
   },[saveToast]);
-  const scanLabelFn=async()=>{setScanning(true);setScanErr(null);try{const res=await aLabel(scanImgs,profile.apiKey);if(res._unreadable){setPForm(f=>({...f,name:res.name||f.name}));setScanErr("Label was not clear enough to read — product name detected: \""+res.name+"\". Please enter macros manually.");}else{setPForm(f=>({...f,name:res.name||"",kcal:String(Math.round(res.kcal)||""),p:String(res.p||""),c:String(res.c||""),f:String(res.f||""),packageG:res.packageG?String(res.packageG):f.packageG}));}}catch(e){setScanErr(String(e.message||e));}setScanning(false);};
+  const scanLabelFn=async()=>{setScanning(true);setScanErr(null);try{const res=await aLabel(scanImgs,profile.apiKey);if(res._unreadable){setPForm(f=>({...f,name:res.name||f.name}));setScanErr("Label was not clear enough to read — product name detected: \""+res.name+"\". Please enter macros manually.");}else{const name=res.name||"";setPForm(f=>({...f,name,kcal:String(Math.round(res.kcal)||""),p:String(res.p||""),c:String(res.c||""),f:String(res.f||""),packageG:res.packageG?String(res.packageG):f.packageG}));// Check for duplicate immediately so user sees it before filling the form
+      const dupIdx=products.findIndex(x=>x.name.trim().toLowerCase()===name.trim().toLowerCase());
+      if(dupIdx>=0){const np={name:name.trim(),kcal:Math.round(res.kcal)||0,p:res.p||0,c:res.c||0,f:res.f||0,packageG:res.packageG||null,wholeOnly:false};setSaveToast({type:"duplicate",name:name,dupIdx,np});}
+    }}catch(e){setScanErr(String(e.message||e));}setScanning(false);};;
   const filtered=products.filter(p=>p.name.toLowerCase().includes(search.toLowerCase()));
   const PrepCard=({prep})=>{
     const totalG = prep.totalWeightG || 0;
@@ -2590,7 +2657,19 @@ function HistoryTab({weights,products,profile}){
               <div style={{fontFamily:"monospace",fontSize:10,color:C.blue}}>{Math.round(totals.protein)}g P</div>
               <div style={{fontFamily:"monospace",fontSize:10,color:C.orange}}>{Math.round(totals.carbs)}g C</div>
               <div style={{fontFamily:"monospace",fontSize:10,color:C.purple}}>{Math.round(totals.fat)}g F</div>
-              {actKcal>0&&<div style={{fontFamily:"monospace",fontSize:10,color:C.orange}}>+{Math.round(actKcal)}🔥</div>}
+              {actKcal>0&&(()=>{
+                // Group burned kcal by activity type for the collapsed row summary
+                const acts=log.activities||[];
+                const byType={gym:0,run:0,walk:0,other:0};
+                acts.forEach(a=>{const t=a.type==="gym"?"gym":a.type==="run"?"run":a.type==="walk"?"walk":"other";byType[t]+=(a.kcal||0);});
+                if(log.burnedExtra)byType.other+=(log.burnedExtra||0);
+                const parts=[];
+                if(byType.gym>0)parts.push("🏋️+"+Math.round(byType.gym));
+                if(byType.run>0)parts.push("🏃+"+Math.round(byType.run));
+                if(byType.walk>0)parts.push("🚶+"+Math.round(byType.walk));
+                if(byType.other>0)parts.push("⚡+"+Math.round(byType.other));
+                return <div style={{fontFamily:"monospace",fontSize:10,color:C.orange,textAlign:"right"}}>{parts.join(" ")}</div>;
+              })()}
             </div>
             <span style={{color:C.muted,fontSize:11}}>{isExp?"▲":"▼"}</span>
           </button>
