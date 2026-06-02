@@ -46,6 +46,20 @@ const DAY_TAGS = [
   { id:"sick",     emoji:"🤒", label:"Sick"      },
   { id:"cheat",    emoji:"🎉", label:"Cheat day" },
 ];
+// Product categories, modeled on supermarket aisles. A product can have multiple.
+const PRODUCT_CATEGORIES = [
+  { id:"protein",   label:"Protein & Meat",     emoji:"🍗" },
+  { id:"dairy",     label:"Dairy & Alt",        emoji:"🥛" },
+  { id:"produce",   label:"Produce",            emoji:"🥦" },
+  { id:"grains",    label:"Grains & Carbs",     emoji:"🌾" },
+  { id:"pantry",    label:"Pantry & Cooking",   emoji:"🥫" },
+  { id:"snacks",    label:"Snacks",             emoji:"🍫" },
+  { id:"drinks",    label:"Drinks",             emoji:"🥤" },
+  { id:"supps",     label:"Supplements",        emoji:"💪" },
+  { id:"sweets",    label:"Sweets & Spreads",   emoji:"🍯" },
+  { id:"frozen",    label:"Frozen",             emoji:"🧊" },
+];
+const catById=id=>PRODUCT_CATEGORIES.find(c=>c.id===id);
 const MEAL_TYPES = [
   { id:"breakfast", label:"Breakfast", emoji:"🌅" },
   { id:"lunch",     label:"Lunch",     emoji:"☀️"  },
@@ -53,6 +67,26 @@ const MEAL_TYPES = [
   { id:"snack",     label:"Snack",     emoji:"🍎" },
   { id:"drink",     label:"Drink",     emoji:"🥤" },
 ];
+// Default meal type from current time of day.
+//   04:00–11:00 breakfast · 11:00–17:00 lunch · 17:00–22:00 dinner · 22:00–04:00 snack
+function mealTypeByTime(d=new Date()){
+  const h=d.getHours();
+  if(h>=4&&h<11)return"breakfast";
+  if(h>=11&&h<17)return"lunch";
+  if(h>=17&&h<22)return"dinner";
+  return"snack";
+}
+// Override meal type from the content of what's being logged.
+// e.g. a drink → "drink", a protein bar/snack → "snack". Returns null if no strong signal.
+function mealTypeFromContent(text){
+  if(!text)return null;
+  const s=text.toLowerCase();
+  const drinkKw=["drink","beverage","juice","smoothie","shake","coffee","latte","tea","soda","cola","beer","wine","kombucha","cocktail","lemonade","milk ","almond milk","oat milk","water"];
+  const snackKw=["protein bar","cookie","biscuit","chips","crisps","candy","chocolate bar","granola bar","cereal bar","nuts","crackers","popcorn","snack","propud","barebells","yogurt bar"];
+  if(drinkKw.some(k=>s.includes(k)))return"drink";
+  if(snackKw.some(k=>s.includes(k)))return"snack";
+  return null;
+}
 const GOALS = [
   { id:"cut",      label:"Cut",      emoji:"✂️", col:"#ff6b35",
     submodes:[
@@ -726,7 +760,7 @@ function EditMealInline({meal,onSave,onCancel,products,apiKey}){
   </div>);
 }
 function EditActInline({act,onSave,onCancel}){const [label,setLabel]=useState(act.label);const [kcal,setKcal]=useState(String(act.kcal));const [dist,setDist]=useState(String(act.distanceKm||""));const [dur,setDur]=useState(String(act.durationMin||""));return(<div style={{background:C.faint,borderRadius:10,padding:"12px 12px 10px"}}><div style={{display:"flex",flexDirection:"column",gap:8}}><Field label="Label" value={label} onChange={setLabel}/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}><Field label="Kcal burned" value={kcal} onChange={setKcal} type="number"/><Field label="Distance km" value={dist} onChange={setDist} type="number"/><Field label="Duration min" value={dur} onChange={setDur} type="number"/></div></div><div style={{display:"flex",gap:7,marginTop:10}}><button onClick={onCancel} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer",fontSize:12}}>Cancel</button><button onClick={()=>onSave({...act,label,kcal:parseFloat(kcal)||0,distanceKm:parseFloat(dist)||null,durationMin:parseFloat(dur)||null})} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>Save</button></div></div>);}
-function AddMealManual({onAdd,onCancel}){const [form,setForm]=useState({name:"",kcal:"",protein:"",carbs:"",fat:"",notes:""});const [mealType,setMealType]=useState("snack");return(<div style={{background:C.faint,borderRadius:10,padding:"12px 12px 10px"}}><div style={{display:"flex",gap:4,marginBottom:8}}>{MEAL_TYPES.map(mt=>(<button key={mt.id} onClick={()=>setMealType(mt.id)} style={{flex:1,padding:"5px 2px",borderRadius:7,border:`1px solid ${mealType===mt.id?C.lime:C.border}`,background:mealType===mt.id?`${C.lime}18`:C.bg,color:mealType===mt.id?C.lime:C.muted,cursor:"pointer",fontSize:8.5,textAlign:"center",lineHeight:1.4}}><div style={{fontSize:11}}>{mt.emoji}</div><div>{mt.label}</div></button>))}</div><MacroFields form={form} setForm={setForm}/><div style={{display:"flex",gap:7,marginTop:10}}><button onClick={onCancel} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer",fontSize:12}}>Cancel</button><button onClick={()=>{if(!form.name&&!form.kcal)return;onAdd({id:Date.now(),name:form.name||"Meal",kcal:parseFloat(form.kcal)||0,protein:parseFloat(form.protein)||0,carbs:parseFloat(form.carbs)||0,fat:parseFloat(form.fat)||0,notes:form.notes,mealType,time:"--:--"});}} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>Add</button></div></div>);}
+function AddMealManual({onAdd,onCancel}){const [form,setForm]=useState({name:"",kcal:"",protein:"",carbs:"",fat:"",notes:""});const [mealType,setMealType]=useState(mealTypeByTime());return(<div style={{background:C.faint,borderRadius:10,padding:"12px 12px 10px"}}><div style={{display:"flex",gap:4,marginBottom:8}}>{MEAL_TYPES.map(mt=>(<button key={mt.id} onClick={()=>setMealType(mt.id)} style={{flex:1,padding:"5px 2px",borderRadius:7,border:`1px solid ${mealType===mt.id?C.lime:C.border}`,background:mealType===mt.id?`${C.lime}18`:C.bg,color:mealType===mt.id?C.lime:C.muted,cursor:"pointer",fontSize:8.5,textAlign:"center",lineHeight:1.4}}><div style={{fontSize:11}}>{mt.emoji}</div><div>{mt.label}</div></button>))}</div><MacroFields form={form} setForm={setForm}/><div style={{display:"flex",gap:7,marginTop:10}}><button onClick={onCancel} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer",fontSize:12}}>Cancel</button><button onClick={()=>{if(!form.name&&!form.kcal)return;onAdd({id:Date.now(),name:form.name||"Meal",kcal:parseFloat(form.kcal)||0,protein:parseFloat(form.protein)||0,carbs:parseFloat(form.carbs)||0,fat:parseFloat(form.fat)||0,notes:form.notes,mealType,time:"--:--"});}} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>Add</button></div></div>);}
 function AddActManual({onAdd,onCancel}){const [type,setType]=useState("run");const [label,setLabel]=useState("");const [kcal,setKcal]=useState("");const [dist,setDist]=useState("");const [dur,setDur]=useState("");return(<div style={{background:C.faint,borderRadius:10,padding:"12px 12px 10px"}}><div style={{display:"flex",gap:5,marginBottom:9}}>{[["🏋️","gym"],["🏃","run"],["🚶","walk"]].map(([ic,t])=>(<button key={t} onClick={()=>setType(t)} style={{flex:1,padding:"7px 4px",borderRadius:8,border:`1px solid ${type===t?C.lime:C.border}`,background:type===t?`${C.lime}20`:C.bg,color:type===t?C.lime:C.muted,fontWeight:type===t?700:500,cursor:"pointer",fontSize:12}}>{ic} {t}</button>))}</div><div style={{display:"flex",flexDirection:"column",gap:8}}><Field label="Label (optional)" value={label} onChange={setLabel} placeholder="auto-generated"/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}><Field label="Kcal burned" value={kcal} onChange={setKcal} type="number" placeholder="0"/><Field label="Distance km" value={dist} onChange={setDist} type="number"/><Field label="Duration min" value={dur} onChange={setDur} type="number"/></div></div><div style={{display:"flex",gap:7,marginTop:10}}><button onClick={onCancel} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.card,border:`1px solid ${C.border}`,color:C.text,fontWeight:600,cursor:"pointer",fontSize:12}}>Cancel</button><button onClick={()=>{if(!kcal)return;onAdd({id:Date.now(),type,label:label||(type==="gym"?"Gym Session":`${type==="run"?"Run":"Walk"}${dist?` ${dist}km`:""}`),kcal:parseFloat(kcal)||0,distanceKm:parseFloat(dist)||null,durationMin:parseFloat(dur)||null,time:"--:--"});}} style={{flex:1,padding:"8px 0",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>Add</button></div></div>);}
 
 function EditPrepSheet({prep,onSave,onClose}){
@@ -1017,7 +1051,7 @@ function IngredientConfirmPanel({ingredients, setIngredients, products, onConfir
                         <div style={{fontSize:9,color:C.muted,fontFamily:"monospace",marginBottom:2}}>{lbl}/100g</div>
                         <input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={k==="kcal"?m.kcal100:k==="p"?m.p100:k==="c"?m.c100:m.f100}
                           onChange={e=>editPer100(i,k,e.target.value)}
-                          style={{width:"100%",boxSizing:"border-box",background:C.card,border:`1px solid ${C.border}`,padding:"5px 6px",borderRadius:5,color:col,fontSize:12,fontFamily:"monospace",outline:"none"}}/>
+                          style={{width:"100%",boxSizing:"border-box",background:C.card,border:`1px solid ${C.border}`,borderRadius:5,padding:"5px 6px",color:col,fontSize:12,fontFamily:"monospace",outline:"none"}}/>
                       </div>
                     ))}
                   </div>
@@ -1388,15 +1422,6 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose,products,
           <div style={{fontSize:10,color:C.muted,marginBottom:6,fontFamily:"monospace"}}>{pickedProd.kcal} kcal · {pickedProd.p}g P · {pickedProd.c}g C · {pickedProd.f}g F per 100g</div>
           {pickedProd.wholeOnly&&pickedProd.packageG&&<div style={{fontSize:10,color:C.lime,marginBottom:6,fontStyle:"italic"}}>🔒 Always eaten whole — defaults to {pickedProd.packageG}g</div>}
           {pickedProd.packageG&&!pickedProd.wholeOnly&&<div style={{fontSize:10,color:C.muted,marginBottom:6}}>Package: {pickedProd.packageG}g <button type="button" onClick={()=>setPickedG(String(pickedProd.packageG))} style={{background:"none",border:`1px solid ${C.border}`,color:C.lime,fontSize:9,cursor:"pointer",padding:"1px 6px",borderRadius:4,marginLeft:4}}>use full pack</button></div>}
-          <div style={{display:"flex",gap:7,alignItems:"center"}}>
-            <input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={pickedG} onChange={e=>setPickedG(e.target.value.replace(",","."))} placeholder="100" style={{width:70,background:C.bg,border:`1px solid ${C.lime}`,borderRadius:6,padding:"6px 9px",color:C.lime,fontSize:14,fontFamily:"monospace",fontWeight:700,outline:"none"}}/>
-            <span style={{fontSize:11,color:C.muted}}>g</span>
-            {(()=>{const g=parseFloat(pickedG)||0;const s=g/100;return(<div style={{display:"flex",gap:7,marginLeft:"auto"}}><Chip val={Math.round(pickedProd.kcal*s)} label="kcal" color={C.lime}/><Chip val={Math.round(pickedProd.p*s*10)/10} label="P" color={C.blue}/></div>);})()}
-          </div>
-          <div style={{display:"flex",gap:6,marginTop:8}}>
-            <button onClick={()=>setPickedProd(null)} style={{flex:1,padding:"7px 0",borderRadius:6,background:"none",border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:11}}>← Back</button>
-            <button onClick={()=>{const g=parseFloat(pickedG)||0;if(g<=0)return;const s=g/100;setExtras(p=>[...p,{id:Date.now(),source:"label",name:pickedProd.name,weightG:g,kcal:pickedProd.kcal*s,protein:pickedProd.p*s,carbs:pickedProd.c*s,fat:pickedProd.f*s}]);setExtrasMode(null);setPickedProd(null);}} disabled={!parseFloat(pickedG)} style={{flex:2,padding:"7px 0",borderRadius:6,background:parseFloat(pickedG)?C.lime:C.faint,border:"none",color:"#000",fontWeight:700,cursor:parseFloat(pickedG)?"pointer":"default",fontSize:12}}>Add Extra</button>
-          </div>
         </div>)}
       </div>}
       {extrasMode==="photo"&&<div style={{background:C.faint,borderRadius:10,padding:"10px 12px"}}>
@@ -1446,7 +1471,7 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose,products,
 }
 
 function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey,initialMode}){
-  const [mode,setMode]=useState(initialMode||"photos");const [mt,setMt]=useState("home");const [desc,setDesc]=useState("");const [imgs,setImgs]=useState([]);const [result,setResult]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState(null);const [form,setForm]=useState({name:"",kcal:"",protein:"",carbs:"",fat:"",notes:""});const [mealType,setMealType]=useState("breakfast");const [gramsEaten,setGramsEaten]=useState("");const [per100,setPer100]=useState(null);const [aiNotes,setAiNotes]=useState("");
+  const [mode,setMode]=useState(initialMode||"photos");const [mt,setMt]=useState("home");const [desc,setDesc]=useState("");const [imgs,setImgs]=useState([]);const [result,setResult]=useState(null);const [loading,setLoading]=useState(false);const [err,setErr]=useState(null);const [form,setForm]=useState({name:"",kcal:"",protein:"",carbs:"",fat:"",notes:""});const [mealType,setMealType]=useState(mealTypeByTime());const [mealTypeTouched,setMealTypeTouched]=useState(false);const [gramsEaten,setGramsEaten]=useState("");const [per100,setPer100]=useState(null);const [aiNotes,setAiNotes]=useState("");
   // Manual-mode label picker state: build a meal from one or more label entries
   const [manualLabels,setManualLabels]=useState([]); // [{id, name, weightG, kcal, protein, carbs, fat}]
   const [mPickOpen,setMPickOpen]=useState(false);
@@ -1455,6 +1480,7 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey,init
   const [mPickedG,setMPickedG]=useState("");
   // Dedicated labels-only mode state (issue 2)
   const [lblSearch,setLblSearch]=useState("");
+  const [lblCat,setLblCat]=useState(null); // category filter in labels mode
   const [lblPicked,setLblPicked]=useState(null);
   const [lblG,setLblG]=useState("");
   const [lblItems,setLblItems]=useState([]); // [{id,name,weightG,kcal,protein,carbs,fat}]
@@ -1477,6 +1503,9 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey,init
         if(ingTotal>0){setPer100({kcal:Math.round(resKcal/ingTotal*100),p:Math.round(resProt/ingTotal*100*10)/10,c:Math.round(resCarbs/ingTotal*100*10)/10,f:Math.round(resFat/ingTotal*100*10)/10,grams:ingTotal});setGramsEaten(String(Math.round(ingTotal)));}
       }
       setForm({name:res.name||"",kcal:String(resKcal),protein:String(resProt),carbs:String(resCarbs),fat:String(resFat),notes:res.notes||""});setAiNotes(res.notes||"");
+      // Content-based meal type override: if the analyzed food clearly reads as a drink or snack,
+      // and the user hasn't manually picked a type, switch to it.
+      if(!mealTypeTouched){const ct=mealTypeFromContent((res.name||"")+" "+(res.notes||"")+" "+desc);if(ct)setMealType(ct);}
       // If AI returned ingredient breakdown, show confirmation step.
       // For canteen meals, mark each ingredient as _canteen so the confirm panel does NOT
       // auto-match against the user's product labels (we don't know what the kitchen used).
@@ -1533,7 +1562,7 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey,init
     <div style={{display:"flex",gap:5,marginBottom:10,flexWrap:"wrap"}}>{[["📸 Photos","photos"],["🏷️ Labels","labels"],["✏️ Manual","manual"],["🍱 Prep","mealprep"]].map(([lbl,m])=>(<button key={m} onClick={()=>{setMode(m);setResult(null);}} style={{flex:1,minWidth:60,padding:"8px 4px",borderRadius:10,border:`1px solid ${mode===m?C.lime:C.border}`,background:mode===m?`${C.lime}20`:C.card,color:mode===m?C.lime:C.muted,fontWeight:mode===m?700:500,cursor:"pointer",fontSize:11}}>{lbl}</button>))}</div>
     <div style={{marginBottom:14}}>
       <div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Meal type</div>
-      <div style={{display:"flex",gap:5}}>{[["🌅","breakfast","Breakfast"],["☀️","lunch","Lunch"],["🌙","dinner","Dinner"],["🍎","snack","Snack"],["🥤","drink","Drink"]].map(([ic,id,lbl])=>{const active=mealType===id;return(<button key={id} onClick={()=>setMealType(id)} style={{flex:1,padding:"6px 2px",borderRadius:8,border:`1px solid ${active?C.lime:C.border}`,background:active?`${C.lime}18`:C.bg,color:active?C.lime:C.muted,fontWeight:active?700:400,cursor:"pointer",fontSize:9,lineHeight:1.5,textAlign:"center"}}><div style={{fontSize:13}}>{ic}</div><div>{lbl}</div></button>);})}</div>
+      <div style={{display:"flex",gap:5}}>{[["🌅","breakfast","Breakfast"],["☀️","lunch","Lunch"],["🌙","dinner","Dinner"],["🍎","snack","Snack"],["🥤","drink","Drink"]].map(([ic,id,lbl])=>{const active=mealType===id;return(<button key={id} onClick={()=>{setMealType(id);setMealTypeTouched(true);}} style={{flex:1,padding:"6px 2px",borderRadius:8,border:`1px solid ${active?C.lime:C.border}`,background:active?`${C.lime}18`:C.bg,color:active?C.lime:C.muted,fontWeight:active?700:400,cursor:"pointer",fontSize:9,lineHeight:1.5,textAlign:"center"}}><div style={{fontSize:13}}>{ic}</div><div>{lbl}</div></button>);})}</div>
     </div>
     {/* ── Labels mode (issue 2) ── */}
     {mode==="labels"&&(<div>
@@ -1554,14 +1583,18 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey,init
       </div>}
       {!lblPicked?(<>
         <input value={lblSearch} onChange={e=>setLblSearch(e.target.value)} placeholder="Search labels (protein bar, oats…)" style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 11px",color:C.text,fontSize:13,outline:"none",marginBottom:7}}/>
+        <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:7}}>
+          <button onClick={()=>setLblCat(null)} style={{padding:"3px 8px",borderRadius:12,border:`1px solid ${!lblCat?C.lime:C.border}`,background:!lblCat?`${C.lime}18`:C.bg,color:!lblCat?C.lime:C.muted,cursor:"pointer",fontSize:9.5}}>All</button>
+          {PRODUCT_CATEGORIES.filter(cat=>products.some(p=>(p.categories||[]).includes(cat.id))).map(cat=>{const on=lblCat===cat.id;return(<button key={cat.id} onClick={()=>setLblCat(on?null:cat.id)} style={{padding:"3px 8px",borderRadius:12,border:`1px solid ${on?C.lime:C.border}`,background:on?`${C.lime}18`:C.bg,color:on?C.lime:C.muted,cursor:"pointer",fontSize:9.5}}>{cat.emoji}</button>);})}
+        </div>
         <div style={{display:"flex",flexDirection:"column",gap:5,maxHeight:260,overflowY:"auto"}}>
-          {(products||[]).filter(p=>!lblSearch||p.name.toLowerCase().includes(lblSearch.toLowerCase())).slice(0,20).map(prod=>(
+          {(products||[]).filter(p=>(!lblSearch||p.name.toLowerCase().includes(lblSearch.toLowerCase()))&&(!lblCat||(p.categories||[]).includes(lblCat))).slice(0,20).map(prod=>(
             <button key={prod.name} type="button" onClick={()=>{setLblPicked(prod);setLblG(prod.wholeOnly&&prod.packageG?String(prod.packageG):"");}} style={{padding:"8px 11px",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
-              <span style={{fontSize:12,color:C.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{prod.name}</span>
+              <span style={{fontSize:12,color:C.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{(prod.categories||[]).map(cid=>catById(cid)?.emoji).filter(Boolean).join("")} {prod.name}</span>
               <span style={{fontFamily:"monospace",fontSize:10,color:C.muted,flexShrink:0,marginLeft:8}}>{prod.kcal}k {prod.p}P</span>
             </button>
           ))}
-          {products.filter(p=>!lblSearch||p.name.toLowerCase().includes(lblSearch.toLowerCase())).length===0&&<div style={{fontSize:11,color:C.muted,padding:"4px 0"}}>No labels match.</div>}
+          {products.filter(p=>(!lblSearch||p.name.toLowerCase().includes(lblSearch.toLowerCase()))&&(!lblCat||(p.categories||[]).includes(lblCat))).length===0&&<div style={{fontSize:11,color:C.muted,padding:"4px 0"}}>No labels match.</div>}
         </div>
       </>):(<div style={{background:C.faint,borderRadius:10,padding:"12px 14px"}}>
         <div style={{fontSize:13,fontWeight:700,color:C.lime,marginBottom:3}}>{lblPicked.name}</div>
@@ -1971,6 +2004,8 @@ function TodayTab({dayData,setDayData,mealPreps,setMealPreps,products,setProduct
 
       {/* Active preps */}
       {activePreps.length>0&&<div style={{marginBottom:12}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Active Preps</div><div style={{display:"flex",flexDirection:"column",gap:6}}>{activePreps.map(prep=>{const remGrams=Math.round(prep.remainingWeightG??prep.totalWeightG??0);const remPortions=Math.max(prep.remaining||1,1);const liveSuggested=remPortions>0?Math.round(remGrams/remPortions):0;return(<div key={prep.id} style={{background:C.card,border:`1px solid ${C.dim}`,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:13,fontWeight:600,color:C.text}}>{prep.name}</div><div style={{fontSize:10,color:C.muted,marginTop:2}}>{remGrams}g left · {remPortions} portion{remPortions!==1?"s":""} · <span style={{fontFamily:"monospace",color:C.lime}}>~{liveSuggested}g each</span></div></div><button onClick={()=>setModal("mealprep")} style={{padding:"7px 13px",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Eat</button></div>);})}</div></div>}
+
+      {/* Meals */}
       <div><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>{dayData.meals.length} meals</div>
         <div style={{display:"flex",flexDirection:"column",gap:7}}>
           {dayData.meals.map(m=>{
@@ -2201,36 +2236,46 @@ function ActivityTab({dayData,setDayData,profile,weights,setWeights,weightPhases
 function FoodTab({mealPreps,setMealPreps,products,setProducts,profile}){
   const [modal,setModal]=useState(false);const [editPrep,setEditPrep]=useState(null);const [showProd,setShowProd]=useState(false);
   const [search,setSearch]=useState("");const [showAdd,setShowAdd]=useState(false);const [editPIdx,setEditPIdx]=useState(null);
-  const [pForm,setPForm]=useState({name:"",kcal:"",p:"",c:"",f:"",packageG:"",wholeOnly:false});const [scanImgs,setScanImgs]=useState([]);const [scanning,setScanning]=useState(false);const [scanErr,setScanErr]=useState(null);
-  const [saveToast,setSaveToast]=useState(null);
+  const [pForm,setPForm]=useState({name:"",kcal:"",p:"",c:"",f:"",packageG:"",wholeOnly:false,categories:[],supermarket:""});const [scanImgs,setScanImgs]=useState([]);const [scanning,setScanning]=useState(false);const [scanErr,setScanErr]=useState(null);
+  // Feedback for product save attempts (success / duplicate / updated)
+  const [saveToast,setSaveToast]=useState(null); // {type:"added"|"updated"|"duplicate", name}
+  // Category + supermarket filters for the product list
+  const [catFilter,setCatFilter]=useState(null); // category id or null
+  const [martFilter,setMartFilter]=useState(null); // supermarket name or null
   const pff=k=>v=>setPForm(p=>({...p,[k]:v}));
   const active=mealPreps.filter(p=>p.remaining>0);const done=mealPreps.filter(p=>p.remaining===0);
   const [showDone,setShowDone]=useState(false);
-  const clearForm=()=>{setPForm({name:"",kcal:"",p:"",c:"",f:"",packageG:"",wholeOnly:false});setScanImgs([]);};
+  const clearForm=()=>{setPForm({name:"",kcal:"",p:"",c:"",f:"",packageG:"",wholeOnly:false,categories:[],supermarket:""});setScanImgs([]);};
+  const toggleCat=id=>setPForm(p=>({...p,categories:(p.categories||[]).includes(id)?p.categories.filter(c=>c!==id):[...(p.categories||[]),id]}));
   const addProduct=()=>{
-    const np={name:pForm.name.trim(),kcal:parseFloat(pForm.kcal)||0,p:parseFloat(pForm.p)||0,c:parseFloat(pForm.c)||0,f:parseFloat(pForm.f)||0,packageG:parseFloat(pForm.packageG)||null,wholeOnly:!!pForm.wholeOnly};
+    const np={name:pForm.name.trim(),kcal:parseFloat(pForm.kcal)||0,p:parseFloat(pForm.p)||0,c:parseFloat(pForm.c)||0,f:parseFloat(pForm.f)||0,packageG:parseFloat(pForm.packageG)||null,wholeOnly:!!pForm.wholeOnly,categories:pForm.categories||[],supermarket:pForm.supermarket.trim()||null};
     if(!np.name)return;
     const dupIdx=products.findIndex(x=>x.name.toLowerCase()===np.name.toLowerCase());
-    if(dupIdx>=0){setSaveToast({type:"duplicate",name:np.name,dupIdx,np});return;}
+    if(dupIdx>=0){
+      // Don't silently drop the user's input — keep the form open and let them resolve.
+      setSaveToast({type:"duplicate",name:np.name,dupIdx,np});
+      return;
+    }
     setProducts(prev=>[...prev,np]);
     setSaveToast({type:"added",name:np.name});
     clearForm();setShowAdd(false);setEditPIdx(null);
   };
-  const startEditP=i=>{const p=products[i];setPForm({name:p.name,kcal:String(p.kcal),p:String(p.p),c:String(p.c),f:String(p.f),packageG:p.packageG?String(p.packageG):"",wholeOnly:!!p.wholeOnly});setEditPIdx(i);setShowAdd(false);setSaveToast(null);};
+  const startEditP=i=>{const p=products[i];setPForm({name:p.name,kcal:String(p.kcal),p:String(p.p),c:String(p.c),f:String(p.f),packageG:p.packageG?String(p.packageG):"",wholeOnly:!!p.wholeOnly,categories:p.categories||[],supermarket:p.supermarket||""});setEditPIdx(i);setShowAdd(false);setSaveToast(null);};
   const saveEditP=()=>{
-    const np={name:pForm.name.trim(),kcal:parseFloat(pForm.kcal)||0,p:parseFloat(pForm.p)||0,c:parseFloat(pForm.c)||0,f:parseFloat(pForm.f)||0,packageG:parseFloat(pForm.packageG)||null,wholeOnly:!!pForm.wholeOnly};
+    const np={name:pForm.name.trim(),kcal:parseFloat(pForm.kcal)||0,p:parseFloat(pForm.p)||0,c:parseFloat(pForm.c)||0,f:parseFloat(pForm.f)||0,packageG:parseFloat(pForm.packageG)||null,wholeOnly:!!pForm.wholeOnly,categories:pForm.categories||[],supermarket:pForm.supermarket.trim()||null};
     if(!np.name)return;
     setProducts(prev=>prev.map((x,i)=>i===editPIdx?np:x));
     setSaveToast({type:"updated",name:np.name});
     clearForm();setEditPIdx(null);
   };
+  // Resolve a duplicate: either overwrite the existing entry, or append "(2)" and save as new.
   const resolveDup=(mode)=>{
     if(!saveToast||saveToast.type!=="duplicate")return;
     const {name, dupIdx, np} = saveToast;
     if(mode==="update"){
       setProducts(prev=>prev.map((x,i)=>i===dupIdx?np:x));
       setSaveToast({type:"updated",name});
-    } else {
+    } else { // "new" — append a uniqueness suffix
       let candidate = name + " (2)"; let n = 2;
       while(products.some(x=>x.name.toLowerCase()===candidate.toLowerCase())){n++;candidate = name + " ("+n+")";}
       setProducts(prev=>[...prev,{...np,name:candidate}]);
@@ -2238,6 +2283,7 @@ function FoodTab({mealPreps,setMealPreps,products,setProducts,profile}){
     }
     clearForm();setShowAdd(false);setEditPIdx(null);
   };
+  // Auto-dismiss success/updated toasts after a few seconds; keep duplicate toasts until resolved.
   useEffect(()=>{
     if(!saveToast||saveToast.type==="duplicate")return;
     const t=setTimeout(()=>setSaveToast(null),4000);
@@ -2246,8 +2292,15 @@ function FoodTab({mealPreps,setMealPreps,products,setProducts,profile}){
   const scanLabelFn=async()=>{setScanning(true);setScanErr(null);try{const res=await aLabel(scanImgs,profile.apiKey);if(res._unreadable){setPForm(f=>({...f,name:res.name||f.name}));setScanErr("Label was not clear enough to read — product name detected: \""+res.name+"\". Please enter macros manually.");}else{const name=res.name||"";setPForm(f=>({...f,name,kcal:String(Math.round(res.kcal)||""),p:String(res.p||""),c:String(res.c||""),f:String(res.f||""),packageG:res.packageG?String(res.packageG):f.packageG}));// Check for duplicate immediately so user sees it before filling the form
       const dupIdx=products.findIndex(x=>x.name.trim().toLowerCase()===name.trim().toLowerCase());
       if(dupIdx>=0){const np={name:name.trim(),kcal:Math.round(res.kcal)||0,p:res.p||0,c:res.c||0,f:res.f||0,packageG:res.packageG||null,wholeOnly:false};setSaveToast({type:"duplicate",name:name,dupIdx,np});}
-    }}catch(e){setScanErr(String(e.message||e));}setScanning(false);};;
-  const filtered=products.filter(p=>p.name.toLowerCase().includes(search.toLowerCase()));
+    }}catch(e){setScanErr(String(e.message||e));}setScanning(false);};
+  const filtered=products.filter(p=>{
+    if(search&&!p.name.toLowerCase().includes(search.toLowerCase()))return false;
+    if(catFilter&&!(p.categories||[]).includes(catFilter))return false;
+    if(martFilter&&(p.supermarket||"")!==martFilter)return false;
+    return true;
+  });
+  // Distinct supermarkets present in the product list, for the filter dropdown
+  const supermarkets=[...new Set(products.map(p=>p.supermarket).filter(Boolean))].sort();
   const PrepCard=({prep})=>{
     const totalG = prep.totalWeightG || 0;
     const remG = Math.round(prep.remainingWeightG ?? totalG);
@@ -2292,11 +2345,16 @@ function FoodTab({mealPreps,setMealPreps,products,setProducts,profile}){
       <div style={{padding:"18px 0 14px"}}><div style={{fontSize:26,fontWeight:800,color:C.text,letterSpacing:"-0.03em"}}>Food</div><div style={{fontSize:12,color:C.muted}}>{active.length} active prep{active.length!==1?"s":""} · {products.length} products</div></div>
       <div style={{marginBottom:16}}><div style={{fontSize:11,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Meal Preps</div>{mealPreps.length===0&&<div style={{textAlign:"center",padding:"16px 0",color:C.muted,fontSize:13}}>No meal preps yet. Tap + to create.</div>}{active.length>0&&<div style={{marginBottom:8}}><div style={{display:"flex",flexDirection:"column",gap:8}}>{active.map(p=><PrepCard key={p.id} prep={p}/>)}</div></div>}{done.length>0&&<div><button onClick={()=>setShowDone(p=>!p)} style={{width:"100%",padding:"8px 12px",borderRadius:10,background:C.card,border:`1px solid ${showDone?C.border:C.dim}`,color:C.muted,fontWeight:600,cursor:"pointer",fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:showDone?8:0,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}><span>Finished ({done.length})</span><span>{showDone?"▲":"▼"}</span></button>{showDone&&<div style={{display:"flex",flexDirection:"column",gap:8}}>{done.map(p=><PrepCard key={p.id} prep={p}/>)}</div>}</div>}</div>
       <button onClick={()=>setShowProd(p=>!p)} style={{width:"100%",padding:"12px 16px",borderRadius:12,background:C.card,border:`1px solid ${showProd?C.lime:C.border}`,color:showProd?C.lime:C.text,fontWeight:600,cursor:"pointer",fontSize:13,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:showProd?10:0}}><span>Product Labels ({products.length})</span><span style={{fontSize:11}}>{showProd?"▲":"▼"}</span></button>
-      {showProd&&<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><span style={{fontSize:11,color:C.muted}}>per 100g</span><button onClick={()=>{setShowAdd(p=>!p);setEditPIdx(null);setPForm({name:"",kcal:"",p:"",c:"",f:"",packageG:"",wholeOnly:false});setScanImgs([]);}} style={{padding:"7px 14px",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Add</button></div><input placeholder="Search products…" value={search} onChange={e=>setSearch(e.target.value)} style={{width:"100%",boxSizing:"border-box",background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"9px 14px",color:C.text,fontSize:13,outline:"none",marginBottom:8}}/>
+      {showProd&&<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><span style={{fontSize:11,color:C.muted}}>per 100g</span><button onClick={()=>{setShowAdd(p=>!p);setEditPIdx(null);setPForm({name:"",kcal:"",p:"",c:"",f:"",packageG:"",wholeOnly:false,categories:[],supermarket:""});setScanImgs([]);}} style={{padding:"7px 14px",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Add</button></div><input placeholder="Search products…" value={search} onChange={e=>setSearch(e.target.value)} style={{width:"100%",boxSizing:"border-box",background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"9px 14px",color:C.text,fontSize:13,outline:"none",marginBottom:8}}/>
       {saveToast&&(saveToast.type==="added"||saveToast.type==="updated")&&<div style={{background:`${C.lime}15`,border:`1px solid ${C.lime}66`,borderRadius:10,padding:"9px 13px",marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}><div style={{fontSize:12,color:C.lime,fontWeight:600}}>✓ {saveToast.type==="added"?"Added":"Updated"}: <span style={{fontFamily:"monospace"}}>{saveToast.name}</span></div><button onClick={()=>setSaveToast(null)} style={{background:"none",border:"none",color:C.lime,fontSize:16,cursor:"pointer",padding:"0 4px",lineHeight:1}}>×</button></div>}
       {saveToast&&saveToast.type==="duplicate"&&<div style={{background:`${C.yellow}12`,border:`1px solid ${C.yellow}66`,borderRadius:10,padding:"10px 13px",marginBottom:10}}><div style={{fontSize:12,color:C.yellow,fontWeight:600,marginBottom:7,lineHeight:1.4}}>⚠ A product named <span style={{fontFamily:"monospace"}}>"{saveToast.name}"</span> already exists.</div><div style={{display:"flex",gap:6}}><button onClick={()=>resolveDup("update")} style={{flex:1,padding:"7px 0",borderRadius:7,background:C.yellow,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:11}}>Update existing</button><button onClick={()=>resolveDup("new")} style={{flex:1,padding:"7px 0",borderRadius:7,background:C.bg,border:`1px solid ${C.yellow}66`,color:C.yellow,fontWeight:600,cursor:"pointer",fontSize:11}}>Save as new (2)</button><button onClick={()=>setSaveToast(null)} style={{padding:"7px 10px",borderRadius:7,background:"none",border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:11}}>Cancel</button></div></div>}
-      {(showAdd||editPIdx!==null)&&<div style={{background:C.card,border:`1px solid ${editPIdx!==null?C.lime:C.border}`,borderRadius:12,padding:"14px 16px",marginBottom:10}}><div style={{fontSize:11,color:editPIdx!==null?C.lime:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>{editPIdx!==null?"Editing product":"New product"}</div>{showAdd&&editPIdx===null&&<div style={{marginBottom:10}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Scan Nutrition Label</div><ImgZone imgs={scanImgs} setImgs={setScanImgs} compact/>{scanImgs.length>0&&<button onClick={scanLabelFn} disabled={scanning} style={{width:"100%",padding:"9px 0",borderRadius:8,background:scanning?C.faint:C.blue,color:"#000",fontWeight:700,border:"none",cursor:scanning?"default":"pointer",fontSize:13,marginTop:8}}>{scanning?"Reading label…":"Read Label"}</button>}{scanErr&&<div style={{fontSize:11,color:"#ff8080",marginTop:6,wordBreak:"break-word"}}>{scanErr.includes("unreadable")?"Label unreadable — please enter values manually below":scanErr}</div>}</div>}<div style={{display:"flex",flexDirection:"column",gap:8}}><Field label="Product name" value={pForm.name} onChange={pff("name")} placeholder="e.g. Lidl Greek Yogurt"/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><Field label="Kcal/100g" value={pForm.kcal} onChange={pff("kcal")} type="number" placeholder="0"/><Field label="Protein g" value={pForm.p} onChange={pff("p")} type="number" placeholder="0"/><Field label="Carbs g" value={pForm.c} onChange={pff("c")} type="number" placeholder="0"/><Field label="Fat g" value={pForm.f} onChange={pff("f")} type="number" placeholder="0"/></div><div style={{display:"flex",gap:8,alignItems:"flex-end",marginTop:4}}><div style={{flex:1}}><Field label="Package size g (optional)" value={pForm.packageG} onChange={pff("packageG")} type="number" placeholder="e.g. 50 for a bar"/></div><label style={{display:"flex",alignItems:"center",gap:6,padding:"8px 11px",background:pForm.wholeOnly?C.lime+"15":C.bg,border:`1px solid ${pForm.wholeOnly?C.lime:C.border}`,borderRadius:8,cursor:"pointer",userSelect:"none",height:"fit-content",marginBottom:1}}><input type="checkbox" checked={!!pForm.wholeOnly} onChange={e=>pff("wholeOnly")(e.target.checked)} style={{accentColor:C.lime,cursor:"pointer"}}/><span style={{fontSize:11,color:pForm.wholeOnly?C.lime:C.muted,fontWeight:pForm.wholeOnly?600:400}}>Always eaten whole</span></label></div>{pForm.wholeOnly&&pForm.packageG&&<div style={{fontSize:10,color:C.muted,fontStyle:"italic"}}>💡 When you log this, the weight will default to {pForm.packageG}g — useful for protein bars, single-serve drinks, tortillas, etc.</div>}{(()=>{const k=parseFloat(pForm.kcal)||0,p=parseFloat(pForm.p)||0,c=parseFloat(pForm.c)||0,fv=parseFloat(pForm.f)||0;if(k<10)return null;const calc=Math.round(p*4+c*4+fv*9);const diff=Math.abs(k-calc);const pct=k>0?diff/k:0;if(pct<=0.25)return null;return(<div style={{background:"#1a1400",border:`1px solid ${C.yellow}40`,borderRadius:8,padding:"7px 11px",fontSize:11,color:C.yellow,lineHeight:1.4}}>⚠ Numbers don't add up: macros suggest <span style={{fontFamily:"monospace",fontWeight:700}}>~{calc} kcal</span> but you entered <span style={{fontFamily:"monospace",fontWeight:700}}>{k}</span> ({Math.round(pct*100)}% off). Double-check the label — likely one row was misread.</div>);})()}<div style={{display:"flex",gap:8}}><button onClick={()=>{setShowAdd(false);setEditPIdx(null);setPForm({name:"",kcal:"",p:"",c:"",f:"",packageG:"",wholeOnly:false});setScanImgs([]);}} style={{flex:1,padding:"9px 0",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:13}}>Cancel</button><button onClick={editPIdx!==null?saveEditP:addProduct} style={{flex:2,padding:"9px 0",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:13}}>{editPIdx!==null?"Save":"Save Product"}</button></div></div></div>}
-      <div style={{display:"flex",flexDirection:"column",gap:5}}>{filtered.map((p,i)=>{const ri=products.indexOf(p);return(<div key={i} style={{background:C.card,border:`1px solid ${editPIdx===ri?C.lime:C.border}`,borderRadius:10,padding:"9px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div style={{flex:1,marginRight:8,minWidth:0}}><span style={{fontSize:12,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",display:"block"}}>{p.name}</span>{p.packageG&&<span style={{fontSize:9,color:p.wholeOnly?C.lime:C.muted,fontFamily:"monospace",marginTop:1,display:"inline-block"}}>{p.wholeOnly?"🔒 ":""}{p.packageG}g/pack</span>}</div><div style={{display:"flex",gap:5,alignItems:"center",flexShrink:0}}><div style={{display:"flex",gap:6}}><Chip val={p.kcal} label="k" color={C.lime}/><Chip val={p.p} label="P" color={C.blue}/><Chip val={p.c} label="C" color={C.orange}/><Chip val={p.f} label="F" color={C.purple}/></div><button onClick={()=>startEditP(ri)} style={{background:"none",border:`1px solid ${C.border}`,color:C.muted,fontSize:11,cursor:"pointer",padding:"3px 6px",borderRadius:5,marginLeft:3}}>✎</button><button onClick={()=>setProducts(prev=>prev.filter((_,j)=>j!==ri))} style={{background:"none",border:"none",color:C.faint,fontSize:14,cursor:"pointer",padding:"0 2px",lineHeight:1}}>×</button></div></div>);})}</div></div>}
+      {(showAdd||editPIdx!==null)&&<div style={{background:C.card,border:`1px solid ${editPIdx!==null?C.lime:C.border}`,borderRadius:12,padding:"14px 16px",marginBottom:10}}><div style={{fontSize:11,color:editPIdx!==null?C.lime:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>{editPIdx!==null?"Editing product":"New product"}</div>{showAdd&&editPIdx===null&&<div style={{marginBottom:10}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Scan Nutrition Label</div><ImgZone imgs={scanImgs} setImgs={setScanImgs} compact/>{scanImgs.length>0&&<button onClick={scanLabelFn} disabled={scanning} style={{width:"100%",padding:"9px 0",borderRadius:8,background:scanning?C.faint:C.blue,color:"#000",fontWeight:700,border:"none",cursor:scanning?"default":"pointer",fontSize:13,marginTop:8}}>{scanning?"Reading label…":"Read Label"}</button>}{scanErr&&<div style={{fontSize:11,color:"#ff8080",marginTop:6,wordBreak:"break-word"}}>{scanErr.includes("unreadable")?"Label unreadable — please enter values manually below":scanErr}</div>}</div>}<div style={{display:"flex",flexDirection:"column",gap:8}}><Field label="Product name" value={pForm.name} onChange={pff("name")} placeholder="e.g. Lidl Greek Yogurt"/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><Field label="Kcal/100g" value={pForm.kcal} onChange={pff("kcal")} type="number" placeholder="0"/><Field label="Protein g" value={pForm.p} onChange={pff("p")} type="number" placeholder="0"/><Field label="Carbs g" value={pForm.c} onChange={pff("c")} type="number" placeholder="0"/><Field label="Fat g" value={pForm.f} onChange={pff("f")} type="number" placeholder="0"/></div><div style={{display:"flex",gap:8,alignItems:"flex-end",marginTop:4}}><div style={{flex:1}}><Field label="Package size g (optional)" value={pForm.packageG} onChange={pff("packageG")} type="number" placeholder="e.g. 50 for a bar"/></div><label style={{display:"flex",alignItems:"center",gap:6,padding:"8px 11px",background:pForm.wholeOnly?C.lime+"15":C.bg,border:`1px solid ${pForm.wholeOnly?C.lime:C.border}`,borderRadius:8,cursor:"pointer",userSelect:"none",height:"fit-content",marginBottom:1}}><input type="checkbox" checked={!!pForm.wholeOnly} onChange={e=>pff("wholeOnly")(e.target.checked)} style={{accentColor:C.lime,cursor:"pointer"}}/><span style={{fontSize:11,color:pForm.wholeOnly?C.lime:C.muted,fontWeight:pForm.wholeOnly?600:400}}>Always eaten whole</span></label></div>{pForm.wholeOnly&&pForm.packageG&&<div style={{fontSize:10,color:C.muted,fontStyle:"italic"}}>💡 When you log this, the weight will default to {pForm.packageG}g — useful for protein bars, single-serve drinks, tortillas, etc.</div>}<div style={{marginTop:4}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Categories (tap to toggle)</div><div style={{display:"flex",flexWrap:"wrap",gap:5}}>{PRODUCT_CATEGORIES.map(cat=>{const on=(pForm.categories||[]).includes(cat.id);return(<button key={cat.id} type="button" onClick={()=>toggleCat(cat.id)} style={{padding:"5px 9px",borderRadius:16,border:`1px solid ${on?C.lime:C.border}`,background:on?`${C.lime}18`:C.bg,color:on?C.lime:C.muted,cursor:"pointer",fontSize:10.5,fontWeight:on?600:400}}>{cat.emoji} {cat.label}</button>);})}</div></div><Field label="Supermarket (optional)" value={pForm.supermarket} onChange={pff("supermarket")} placeholder="e.g. Lidl, Rimi, Maxima"/>{(()=>{const k=parseFloat(pForm.kcal)||0,p=parseFloat(pForm.p)||0,c=parseFloat(pForm.c)||0,fv=parseFloat(pForm.f)||0;if(k<10)return null;const calc=Math.round(p*4+c*4+fv*9);const diff=Math.abs(k-calc);const pct=k>0?diff/k:0;if(pct<=0.25)return null;return(<div style={{background:"#1a1400",border:`1px solid ${C.yellow}40`,borderRadius:8,padding:"7px 11px",fontSize:11,color:C.yellow,lineHeight:1.4}}>⚠ Numbers don't add up: macros suggest <span style={{fontFamily:"monospace",fontWeight:700}}>~{calc} kcal</span> but you entered <span style={{fontFamily:"monospace",fontWeight:700}}>{k}</span> ({Math.round(pct*100)}% off). Double-check the label — likely one row was misread.</div>);})()}<div style={{display:"flex",gap:8}}><button onClick={()=>{setShowAdd(false);setEditPIdx(null);setPForm({name:"",kcal:"",p:"",c:"",f:"",packageG:"",wholeOnly:false,categories:[],supermarket:""});setScanImgs([]);}} style={{flex:1,padding:"9px 0",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:13}}>Cancel</button><button onClick={editPIdx!==null?saveEditP:addProduct} style={{flex:2,padding:"9px 0",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:13}}>{editPIdx!==null?"Save":"Save Product"}</button></div></div></div>}
+      <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:8}}>
+        <button onClick={()=>setCatFilter(null)} style={{padding:"4px 9px",borderRadius:14,border:`1px solid ${!catFilter?C.lime:C.border}`,background:!catFilter?`${C.lime}18`:C.bg,color:!catFilter?C.lime:C.muted,cursor:"pointer",fontSize:10,fontWeight:!catFilter?600:400}}>All</button>
+        {PRODUCT_CATEGORIES.filter(cat=>products.some(p=>(p.categories||[]).includes(cat.id))).map(cat=>{const on=catFilter===cat.id;return(<button key={cat.id} onClick={()=>setCatFilter(on?null:cat.id)} style={{padding:"4px 9px",borderRadius:14,border:`1px solid ${on?C.lime:C.border}`,background:on?`${C.lime}18`:C.bg,color:on?C.lime:C.muted,cursor:"pointer",fontSize:10,fontWeight:on?600:400}}>{cat.emoji} {cat.label}</button>);})}
+      </div>
+      {supermarkets.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:8,alignItems:"center"}}><span style={{fontSize:9,color:C.muted,fontFamily:"monospace",textTransform:"uppercase"}}>🏪</span>{supermarkets.map(m=>{const on=martFilter===m;return(<button key={m} onClick={()=>setMartFilter(on?null:m)} style={{padding:"4px 9px",borderRadius:14,border:`1px solid ${on?C.blue:C.border}`,background:on?`${C.blue}18`:C.bg,color:on?C.blue:C.muted,cursor:"pointer",fontSize:10,fontWeight:on?600:400}}>{m}</button>);})}</div>}
+      <div style={{display:"flex",flexDirection:"column",gap:5}}>{filtered.map((p,i)=>{const ri=products.indexOf(p);return(<div key={i} style={{background:C.card,border:`1px solid ${editPIdx===ri?C.lime:C.border}`,borderRadius:10,padding:"9px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div style={{flex:1,marginRight:8,minWidth:0}}><span style={{fontSize:12,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",display:"block"}}>{p.name}</span><div style={{display:"flex",gap:5,alignItems:"center",marginTop:2,flexWrap:"wrap"}}>{p.packageG&&<span style={{fontSize:9,color:p.wholeOnly?C.lime:C.muted,fontFamily:"monospace"}}>{p.wholeOnly?"🔒 ":""}{p.packageG}g/pack</span>}{(p.categories||[]).map(cid=>{const cat=catById(cid);return cat?<span key={cid} style={{fontSize:9}} title={cat.label}>{cat.emoji}</span>:null;})}{p.supermarket&&<span style={{fontSize:8.5,color:C.blue,fontFamily:"monospace"}}>🏪{p.supermarket}</span>}</div></div><div style={{display:"flex",gap:5,alignItems:"center",flexShrink:0}}><div style={{display:"flex",gap:6}}><Chip val={p.kcal} label="k" color={C.lime}/><Chip val={p.p} label="P" color={C.blue}/><Chip val={p.c} label="C" color={C.orange}/><Chip val={p.f} label="F" color={C.purple}/></div><button onClick={()=>startEditP(ri)} style={{background:"none",border:`1px solid ${C.border}`,color:C.muted,fontSize:11,cursor:"pointer",padding:"3px 6px",borderRadius:5,marginLeft:3}}>✎</button><button onClick={()=>setProducts(prev=>prev.filter((_,j)=>j!==ri))} style={{background:"none",border:"none",color:C.faint,fontSize:14,cursor:"pointer",padding:"0 2px",lineHeight:1}}>×</button></div></div>);})}</div></div>}
     </div>
     <button onClick={()=>setModal(true)} style={{position:"absolute",bottom:16,right:16,width:54,height:54,borderRadius:"50%",background:C.lime,border:"none",cursor:"pointer",fontSize:28,color:"#000",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 0 20px ${C.lime}55`,zIndex:10}}>+</button>
     {modal&&<CreatePrepSheet products={products} onSave={prep=>{setMealPreps(p=>[prep,...p]);setModal(false);}} onClose={()=>setModal(false)} apiKey={profile.apiKey}/>}
