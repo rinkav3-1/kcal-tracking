@@ -53,6 +53,7 @@ const PRODUCT_CATEGORIES = [
   { id:"produce",   label:"Produce",            emoji:"🥦" },
   { id:"grains",    label:"Grains & Carbs",     emoji:"🌾" },
   { id:"pantry",    label:"Pantry & Cooking",   emoji:"🥫" },
+  { id:"sauces",    label:"Sauces & Condiments",emoji:"🫙" },
   { id:"snacks",    label:"Snacks",             emoji:"🍫" },
   { id:"drinks",    label:"Drinks",             emoji:"🥤" },
   { id:"supps",     label:"Supplements",        emoji:"💪" },
@@ -1099,7 +1100,7 @@ function IngredientConfirmPanel({ingredients, setIngredients, products, onConfir
             <input value={addSearch} onChange={e=>setAddSearch(e.target.value)} placeholder="Search labels…" style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,outline:"none",marginBottom:7}} autoFocus/>
             <div style={{display:"flex",flexDirection:"column",gap:5,maxHeight:200,overflowY:"auto"}}>
               {(products||[]).filter(p=>!addSearch||p.name.toLowerCase().includes(addSearch.toLowerCase())).slice(0,12).map(prod=>(
-                <button key={prod.name} type="button" onClick={()=>{setAddPickedProd(prod);setAddPickedG(prod.wholeOnly&&prod.packageG?String(prod.packageG):"100");}} style={{padding:"7px 11px",borderRadius:7,background:C.card,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
+                <button key={prod.name} type="button" onClick={()=>{setAddPickedProd(prod);setAddPickedG((prod.servingG||prod.packageG)?String(prod.servingG||prod.packageG):"100");}} style={{padding:"7px 11px",borderRadius:7,background:C.card,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
                   <span style={{fontSize:12,color:C.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{prod.name}</span>
                   <span style={{fontFamily:"monospace",fontSize:10,color:C.muted,flexShrink:0,marginLeft:8}}>{prod.kcal}k {prod.p}P</span>
                 </button>
@@ -1410,7 +1411,7 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose,products,
           <input value={pickSearch} onChange={e=>setPickSearch(e.target.value)} placeholder="Search your product labels…" style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,outline:"none",marginBottom:7}} autoFocus/>
           <div style={{display:"flex",flexDirection:"column",gap:5,maxHeight:240,overflowY:"auto"}}>
             {(products||[]).filter(p=>!pickSearch||p.name.toLowerCase().includes(pickSearch.toLowerCase())).slice(0,15).map(prod=>(
-              <button key={prod.name} type="button" onClick={()=>{setPickedProd(prod);setPickedG(prod.wholeOnly&&prod.packageG?String(prod.packageG):"100");}} style={{padding:"8px 11px",borderRadius:7,background:C.card,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
+              <button key={prod.name} type="button" onClick={()=>{setPickedProd(prod);setPickedG(prod.servingG||prod.packageG?String(prod.servingG||prod.packageG):"100");}} style={{padding:"8px 11px",borderRadius:7,background:C.card,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
                 <span style={{fontSize:12,color:C.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{prod.name}</span>
                 <span style={{fontFamily:"monospace",fontSize:10,color:C.muted,flexShrink:0,marginLeft:8}}>{prod.kcal}k {prod.p}P</span>
               </button>
@@ -1420,8 +1421,17 @@ function PrepEatPanel({activePreps,setMealPreps,mealType,onAdd,onClose,products,
         </>):(<div>
           <div style={{fontSize:12,color:C.lime,marginBottom:4,fontWeight:600}}>{pickedProd.name}</div>
           <div style={{fontSize:10,color:C.muted,marginBottom:6,fontFamily:"monospace"}}>{pickedProd.kcal} kcal · {pickedProd.p}g P · {pickedProd.c}g C · {pickedProd.f}g F per 100g</div>
-          {pickedProd.wholeOnly&&pickedProd.packageG&&<div style={{fontSize:10,color:C.lime,marginBottom:6,fontStyle:"italic"}}>🔒 Always eaten whole — defaults to {pickedProd.packageG}g</div>}
-          {pickedProd.packageG&&!pickedProd.wholeOnly&&<div style={{fontSize:10,color:C.muted,marginBottom:6}}>Package: {pickedProd.packageG}g <button type="button" onClick={()=>setPickedG(String(pickedProd.packageG))} style={{background:"none",border:`1px solid ${C.border}`,color:C.lime,fontSize:9,cursor:"pointer",padding:"1px 6px",borderRadius:4,marginLeft:4}}>use full pack</button></div>}
+          {(pickedProd.servingG||pickedProd.packageG)&&<div style={{fontSize:10,color:C.lime,marginBottom:6,fontStyle:"italic"}}>🍽 Usual serving: {pickedProd.servingG||pickedProd.packageG}g</div>}
+          {!(pickedProd.servingG||pickedProd.packageG)&&<div style={{fontSize:10,color:C.muted,marginBottom:6}}>Serving: {pickedProd.servingG||pickedProd.packageG}g <button type="button" onClick={()=>setPickedG(String(pickedProd.servingG||pickedProd.packageG))} style={{background:"none",border:`1px solid ${C.border}`,color:C.lime,fontSize:9,cursor:"pointer",padding:"1px 6px",borderRadius:4,marginLeft:4}}>use</button></div>}
+          <div style={{display:"flex",gap:7,alignItems:"center",marginBottom:8}}>
+            <input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={pickedG} onChange={e=>setPickedG(e.target.value.replace(",","."))} placeholder="100" autoFocus style={{width:70,background:C.bg,border:`1px solid ${C.lime}`,borderRadius:6,padding:"6px 9px",color:C.lime,fontSize:14,fontFamily:"monospace",fontWeight:700,outline:"none"}}/>
+            <span style={{fontSize:11,color:C.muted}}>g</span>
+            {(()=>{const g=parseFloat(pickedG)||0;const s=g/100;return g>0&&<div style={{display:"flex",gap:7,marginLeft:"auto"}}><Chip val={Math.round(pickedProd.kcal*s)} label="kcal" color={C.lime}/><Chip val={Math.round(pickedProd.p*s*10)/10} label="P" color={C.blue}/></div>;})()}
+          </div>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={()=>setPickedProd(null)} style={{flex:1,padding:"7px 0",borderRadius:6,background:"none",border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:11}}>← Back</button>
+            <button onClick={()=>{const g=parseFloat(pickedG)||0;if(g<=0)return;const s=g/100;setExtras(p=>[...p,{id:Date.now(),source:"label",name:pickedProd.name,weightG:g,kcal:pickedProd.kcal*s,protein:pickedProd.p*s,carbs:pickedProd.c*s,fat:pickedProd.f*s}]);setExtrasMode(null);setPickedProd(null);setPickedG("");}} disabled={!parseFloat(pickedG)} style={{flex:2,padding:"7px 0",borderRadius:6,background:parseFloat(pickedG)?C.lime:C.faint,border:"none",color:"#000",fontWeight:700,cursor:parseFloat(pickedG)?"pointer":"default",fontSize:12}}>Add Extra</button>
+          </div>
         </div>)}
       </div>}
       {extrasMode==="photo"&&<div style={{background:C.faint,borderRadius:10,padding:"10px 12px"}}>
@@ -1589,7 +1599,7 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey,init
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:5,maxHeight:260,overflowY:"auto"}}>
           {(products||[]).filter(p=>(!lblSearch||p.name.toLowerCase().includes(lblSearch.toLowerCase()))&&(!lblCat||(p.categories||[]).includes(lblCat))).slice(0,20).map(prod=>(
-            <button key={prod.name} type="button" onClick={()=>{setLblPicked(prod);setLblG(prod.wholeOnly&&prod.packageG?String(prod.packageG):"");}} style={{padding:"8px 11px",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
+            <button key={prod.name} type="button" onClick={()=>{setLblPicked(prod);setLblG(prod.servingG||prod.packageG?String(prod.servingG||prod.packageG):"");}} style={{padding:"8px 11px",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
               <span style={{fontSize:12,color:C.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{(prod.categories||[]).map(cid=>catById(cid)?.emoji).filter(Boolean).join("")} {prod.name}</span>
               <span style={{fontFamily:"monospace",fontSize:10,color:C.muted,flexShrink:0,marginLeft:8}}>{prod.kcal}k {prod.p}P</span>
             </button>
@@ -1599,8 +1609,8 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey,init
       </>):(<div style={{background:C.faint,borderRadius:10,padding:"12px 14px"}}>
         <div style={{fontSize:13,fontWeight:700,color:C.lime,marginBottom:3}}>{lblPicked.name}</div>
         <div style={{fontSize:10,color:C.muted,marginBottom:6,fontFamily:"monospace"}}>{lblPicked.kcal} kcal · {lblPicked.p}g P · {lblPicked.c}g C · {lblPicked.f}g F per 100g</div>
-        {lblPicked.wholeOnly&&lblPicked.packageG&&<div style={{fontSize:10,color:C.lime,marginBottom:6,fontStyle:"italic"}}>🔒 Always eaten whole — {lblPicked.packageG}g</div>}
-        {lblPicked.packageG&&!lblPicked.wholeOnly&&<div style={{fontSize:10,color:C.muted,marginBottom:6}}>Package: {lblPicked.packageG}g <button type="button" onClick={()=>setLblG(String(lblPicked.packageG))} style={{background:"none",border:`1px solid ${C.border}`,color:C.lime,fontSize:9,cursor:"pointer",padding:"1px 6px",borderRadius:4,marginLeft:4}}>use full</button></div>}
+        {(lblPicked.servingG||lblPicked.packageG)&&<div style={{fontSize:10,color:C.lime,marginBottom:6,fontStyle:"italic"}}>🍽 Usual serving: {lblPicked.servingG||lblPicked.packageG}g</div>}
+        {!(lblPicked.servingG||lblPicked.packageG)&&<div style={{fontSize:10,color:C.muted,marginBottom:6}}>Serving: {lblPicked.servingG||lblPicked.packageG}g <button type="button" onClick={()=>setLblG(String(lblPicked.servingG||lblPicked.packageG))} style={{background:"none",border:`1px solid ${C.border}`,color:C.lime,fontSize:9,cursor:"pointer",padding:"1px 6px",borderRadius:4,marginLeft:4}}>use full</button></div>}
         <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
           <input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={lblG} onChange={e=>setLblG(e.target.value.replace(",","."))} placeholder="grams" autoFocus style={{width:80,background:C.bg,border:`1px solid ${C.lime}`,borderRadius:7,padding:"7px 9px",color:C.lime,fontSize:15,fontFamily:"monospace",fontWeight:700,outline:"none"}}/>
           <span style={{fontSize:11,color:C.muted}}>g</span>
@@ -1663,7 +1673,7 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey,init
           <input value={mPickSearch} onChange={e=>setMPickSearch(e.target.value)} placeholder="Search your product labels…" style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,outline:"none",marginBottom:7}} autoFocus/>
           <div style={{display:"flex",flexDirection:"column",gap:5,maxHeight:240,overflowY:"auto"}}>
             {(products||[]).filter(p=>!mPickSearch||p.name.toLowerCase().includes(mPickSearch.toLowerCase())).slice(0,15).map(prod=>(
-              <button key={prod.name} type="button" onClick={()=>{setMPickedProd(prod);setMPickedG(prod.wholeOnly&&prod.packageG?String(prod.packageG):"100");}} style={{padding:"8px 11px",borderRadius:7,background:C.card,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
+              <button key={prod.name} type="button" onClick={()=>{setMPickedProd(prod);setMPickedG(prod.servingG||prod.packageG?String(prod.servingG||prod.packageG):"100");}} style={{padding:"8px 11px",borderRadius:7,background:C.card,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
                 <span style={{fontSize:12,color:C.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{prod.name}</span>
                 <span style={{fontFamily:"monospace",fontSize:10,color:C.muted,flexShrink:0,marginLeft:8}}>{prod.kcal}k {prod.p}P</span>
               </button>
@@ -1673,8 +1683,8 @@ function AddMealSheet({products,mealPreps,setMealPreps,onAdd,onClose,apiKey,init
         </>):(<div>
           <div style={{fontSize:12,color:C.lime,marginBottom:7,fontWeight:600}}>{mPickedProd.name}</div>
           <div style={{fontSize:10,color:C.muted,marginBottom:6,fontFamily:"monospace"}}>{mPickedProd.kcal} kcal · {mPickedProd.p}g P · {mPickedProd.c}g C · {mPickedProd.f}g F per 100g</div>
-          {mPickedProd.wholeOnly&&mPickedProd.packageG&&<div style={{fontSize:10,color:C.lime,marginBottom:6,fontStyle:"italic"}}>🔒 Always eaten whole — defaults to {mPickedProd.packageG}g</div>}
-          {mPickedProd.packageG&&!mPickedProd.wholeOnly&&<div style={{fontSize:10,color:C.muted,marginBottom:6}}>Package: {mPickedProd.packageG}g <button type="button" onClick={()=>setMPickedG(String(mPickedProd.packageG))} style={{background:"none",border:`1px solid ${C.border}`,color:C.lime,fontSize:9,cursor:"pointer",padding:"1px 6px",borderRadius:4,marginLeft:4}}>use full pack</button></div>}
+          {mPickedProd.servingG||mPickedProd.servingG||mPickedProd.packageG&&<div style={{fontSize:10,color:C.lime,marginBottom:6,fontStyle:"italic"}}>🍽 Usual serving size — defaults to {mPickedProd.servingG||mPickedProd.packageG}g</div>}
+          {mPickedProd.servingG||mPickedProd.packageG&&!false&&<div style={{fontSize:10,color:C.muted,marginBottom:6}}>Serving: {mPickedProd.servingG||mPickedProd.packageG}g <button type="button" onClick={()=>setMPickedG(String(mPickedProd.servingG||mPickedProd.packageG))} style={{background:"none",border:`1px solid ${C.border}`,color:C.lime,fontSize:9,cursor:"pointer",padding:"1px 6px",borderRadius:4,marginLeft:4}}>use</button></div>}
           <div style={{display:"flex",gap:7,alignItems:"center"}}>
             <input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={mPickedG} onChange={e=>setMPickedG(e.target.value.replace(",","."))} placeholder="100" style={{width:80,background:C.bg,border:`1px solid ${C.lime}`,borderRadius:6,padding:"6px 9px",color:C.lime,fontSize:14,fontFamily:"monospace",fontWeight:700,outline:"none"}} autoFocus/>
             <span style={{fontSize:11,color:C.muted}}>g</span>
@@ -1846,7 +1856,7 @@ function CreatePrepSheet({products,onSave,onClose,apiKey}){
         <input value={pickSearch} onChange={e=>setPickSearch(e.target.value)} placeholder="Search labels (chicken, rice, oats…)" style={{width:"100%",boxSizing:"border-box",background:C.bg,border:`1px solid ${C.border}`,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,outline:"none",marginBottom:7}}/>
         <div style={{display:"flex",flexDirection:"column",gap:5,maxHeight:220,overflowY:"auto"}}>
           {(products||[]).filter(p=>!pickSearch||p.name.toLowerCase().includes(pickSearch.toLowerCase())).slice(0,15).map(prod=>(
-            <button key={prod.name} type="button" onClick={()=>{setPickedProd(prod);setPickedG(prod.wholeOnly&&prod.packageG?String(prod.packageG):"100");}} style={{padding:"8px 11px",borderRadius:7,background:C.bg,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
+            <button key={prod.name} type="button" onClick={()=>{setPickedProd(prod);setPickedG(prod.servingG||prod.packageG?String(prod.servingG||prod.packageG):"100");}} style={{padding:"8px 11px",borderRadius:7,background:C.bg,border:`1px solid ${C.border}`,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
               <span style={{fontSize:12,color:C.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{prod.name}</span>
               <span style={{fontFamily:"monospace",fontSize:10,color:C.muted,flexShrink:0,marginLeft:8}}>{prod.kcal}k {prod.p}P</span>
             </button>
@@ -1856,8 +1866,8 @@ function CreatePrepSheet({products,onSave,onClose,apiKey}){
       </>):(<div>
         <div style={{fontSize:12,color:C.lime,marginBottom:4,fontWeight:600}}>{pickedProd.name}</div>
         <div style={{fontSize:10,color:C.muted,marginBottom:6,fontFamily:"monospace"}}>{pickedProd.kcal} kcal · {pickedProd.p}g P · {pickedProd.c}g C · {pickedProd.f}g F per 100g</div>
-        {pickedProd.wholeOnly&&pickedProd.packageG&&<div style={{fontSize:10,color:C.lime,marginBottom:6,fontStyle:"italic"}}>🔒 Always eaten whole — defaults to {pickedProd.packageG}g</div>}
-        {pickedProd.packageG&&!pickedProd.wholeOnly&&<div style={{fontSize:10,color:C.muted,marginBottom:6}}>Package: {pickedProd.packageG}g <button type="button" onClick={()=>setPickedG(String(pickedProd.packageG))} style={{background:"none",border:`1px solid ${C.border}`,color:C.lime,fontSize:9,cursor:"pointer",padding:"1px 6px",borderRadius:4,marginLeft:4}}>use full pack</button></div>}
+        {(pickedProd.servingG||pickedProd.packageG)&&<div style={{fontSize:10,color:C.lime,marginBottom:6,fontStyle:"italic"}}>🍽 Usual serving: {pickedProd.servingG||pickedProd.packageG}g</div>}
+        {!(pickedProd.servingG||pickedProd.packageG)&&<div style={{fontSize:10,color:C.muted,marginBottom:6}}>Serving: {pickedProd.servingG||pickedProd.packageG}g <button type="button" onClick={()=>setPickedG(String(pickedProd.servingG||pickedProd.packageG))} style={{background:"none",border:`1px solid ${C.border}`,color:C.lime,fontSize:9,cursor:"pointer",padding:"1px 6px",borderRadius:4,marginLeft:4}}>use</button></div>}
         <div style={{display:"flex",gap:7,alignItems:"center"}}>
           <input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" value={pickedG} onChange={e=>setPickedG(e.target.value.replace(",","."))} placeholder="100" style={{width:80,background:C.bg,border:`1px solid ${C.lime}`,borderRadius:6,padding:"6px 9px",color:C.lime,fontSize:14,fontFamily:"monospace",fontWeight:700,outline:"none"}} autoFocus/>
           <span style={{fontSize:11,color:C.muted}}>g (raw/dry)</span>
@@ -2052,7 +2062,7 @@ function TodayTab({dayData,setDayData,mealPreps,setMealPreps,products,setProduct
 function ActivityTab({dayData,setDayData,profile,weights,setWeights,weightPhases,setWeightPhases}){
   const [modal,setModal]=useState(false);const [view,setView]=useState("today");const [histDates,setHistDates]=useState([]);const [histLogs,setHistLogs]=useState({});const [histLoaded,setHistLoaded]=useState(false);
   const activities=dayData.activities||[];const totalBurned=activities.reduce((s,a)=>s+a.kcal,0)+(dayData.burnedExtra||0);
-  useEffect(()=>{if(view==="history"&&!histLoaded){store.get("fit_dates",[]).then(async ds=>{const e={};for(const d of ds.slice(0,30)){const log=await store.get(`fit_day_${d}`,null);if(log&&(log.activities||[]).length>0)e[d]=log;}setHistLogs(e);setHistDates(Object.keys(e).sort((a,b)=>b.localeCompare(a)));setHistLoaded(true);});}},[view]);
+  useEffect(()=>{if(view==="history"&&!histLoaded){store.get("fit_dates",[]).then(async ds=>{const e={};for(const d of ds){const log=await store.get(`fit_day_${d}`,null);if(log&&(log.activities||[]).length>0)e[d]=log;}setHistLogs(e);setHistDates(Object.keys(e).sort((a,b)=>b.localeCompare(a)));setHistLoaded(true);});}},[view]);
   const addActivity=act=>{setDayData(p=>({...p,activities:[...(p.activities||[]),act]}));setModal(false);};
   const delActivity=id=>{setDayData(p=>({...p,activities:(p.activities||[]).filter(a=>a.id!==id)}));};
   const [wInput,setWInput]=useState("");const [editWIdx,setEditWIdx]=useState(null);const [editWVal,setEditWVal]=useState("");const [wDate,setWDate]=useState(TODAY());const [showAllW,setShowAllW]=useState(false);
@@ -2238,19 +2248,18 @@ function FoodTab({mealPreps,setMealPreps,products,setProducts,profile}){
   const [search,setSearch]=useState("");const [showAdd,setShowAdd]=useState(false);const [editPIdx,setEditPIdx]=useState(null);
   const formRef=useRef(null); // ref on the add/edit form div — scrolled to on edit
   const savedScrollRef=useRef(0); // saves scroll position before opening edit
-  const [pForm,setPForm]=useState({name:"",kcal:"",p:"",c:"",f:"",packageG:"",wholeOnly:false,categories:[],supermarket:""});const [scanImgs,setScanImgs]=useState([]);const [scanning,setScanning]=useState(false);const [scanErr,setScanErr]=useState(null);
-  // Feedback for product save attempts (success / duplicate / updated)
-  const [saveToast,setSaveToast]=useState(null); // {type:"added"|"updated"|"duplicate", name}
-  // Category + supermarket filters for the product list
-  const [catFilter,setCatFilter]=useState(null); // category id or null
-  const [martFilter,setMartFilter]=useState(null); // supermarket name or null
+  const [pForm,setPForm]=useState({name:"",kcal:"",p:"",c:"",f:"",servingG:"",categories:[],supermarket:""});const [scanImgs,setScanImgs]=useState([]);const [scanning,setScanning]=useState(false);const [scanErr,setScanErr]=useState(null);
+  const [saveToast,setSaveToast]=useState(null);
+  const [catFilter,setCatFilter]=useState(null); // category id, "uncategorized", or null
+  const [martFilter,setMartFilter]=useState(null);
+  const [confirmDelete,setConfirmDelete]=useState(null); // index of product to delete
   const pff=k=>v=>setPForm(p=>({...p,[k]:v}));
   const active=mealPreps.filter(p=>p.remaining>0);const done=mealPreps.filter(p=>p.remaining===0);
   const [showDone,setShowDone]=useState(false);
-  const clearForm=()=>{setPForm({name:"",kcal:"",p:"",c:"",f:"",packageG:"",wholeOnly:false,categories:[],supermarket:""});setScanImgs([]);};
+  const clearForm=()=>{setPForm({name:"",kcal:"",p:"",c:"",f:"",servingG:"",categories:[],supermarket:""});setScanImgs([]);};
   const toggleCat=id=>setPForm(p=>({...p,categories:(p.categories||[]).includes(id)?p.categories.filter(c=>c!==id):[...(p.categories||[]),id]}));
   const addProduct=()=>{
-    const np={name:pForm.name.trim(),kcal:parseFloat(pForm.kcal)||0,p:parseFloat(pForm.p)||0,c:parseFloat(pForm.c)||0,f:parseFloat(pForm.f)||0,packageG:parseFloat(pForm.packageG)||null,wholeOnly:!!pForm.wholeOnly,categories:pForm.categories||[],supermarket:pForm.supermarket.trim()||null};
+    const np={name:pForm.name.trim(),kcal:parseFloat(pForm.kcal)||0,p:parseFloat(pForm.p)||0,c:parseFloat(pForm.c)||0,f:parseFloat(pForm.f)||0,packageG:parseFloat(pForm.servingG)||null,categories:pForm.categories||[],supermarket:pForm.supermarket.trim()||null};
     if(!np.name)return;
     const dupIdx=products.findIndex(x=>x.name.toLowerCase()===np.name.toLowerCase());
     if(dupIdx>=0){
@@ -2265,13 +2274,13 @@ function FoodTab({mealPreps,setMealPreps,products,setProducts,profile}){
   const startEditP=i=>{
     savedScrollRef.current=window.scrollY||document.documentElement.scrollTop;
     const p=products[i];
-    setPForm({name:p.name,kcal:String(p.kcal),p:String(p.p),c:String(p.c),f:String(p.f),packageG:p.packageG?String(p.packageG):"",wholeOnly:!!p.wholeOnly,categories:p.categories||[],supermarket:p.supermarket||""});
+    setPForm({name:p.name,kcal:String(p.kcal),p:String(p.p),c:String(p.c),f:String(p.f),servingG:(p.servingG||p.servingG||p.packageG)?String(p.servingG||p.servingG||p.packageG):"",categories:p.categories||[],supermarket:p.supermarket||""});
     setEditPIdx(i);setShowAdd(false);setSaveToast(null);
     // Scroll to form after it renders
     setTimeout(()=>formRef.current?.scrollIntoView({behavior:"smooth",block:"start"}),60);
   };
   const saveEditP=()=>{
-    const np={name:pForm.name.trim(),kcal:parseFloat(pForm.kcal)||0,p:parseFloat(pForm.p)||0,c:parseFloat(pForm.c)||0,f:parseFloat(pForm.f)||0,packageG:parseFloat(pForm.packageG)||null,wholeOnly:!!pForm.wholeOnly,categories:pForm.categories||[],supermarket:pForm.supermarket.trim()||null};
+    const np={name:pForm.name.trim(),kcal:parseFloat(pForm.kcal)||0,p:parseFloat(pForm.p)||0,c:parseFloat(pForm.c)||0,f:parseFloat(pForm.f)||0,packageG:parseFloat(pForm.servingG)||null,categories:pForm.categories||[],supermarket:pForm.supermarket.trim()||null};
     if(!np.name)return;
     setProducts(prev=>prev.map((x,i)=>i===editPIdx?np:x));
     setSaveToast({type:"updated",name:np.name});
@@ -2301,16 +2310,17 @@ function FoodTab({mealPreps,setMealPreps,products,setProducts,profile}){
   },[saveToast]);
   const scanLabelFn=async()=>{setScanning(true);setScanErr(null);try{const res=await aLabel(scanImgs,profile.apiKey);if(res._unreadable){setPForm(f=>({...f,name:res.name||f.name}));setScanErr("Label was not clear enough to read — product name detected: \""+res.name+"\". Please enter macros manually.");}else{const name=res.name||"";setPForm(f=>({...f,name,kcal:String(Math.round(res.kcal)||""),p:String(res.p||""),c:String(res.c||""),f:String(res.f||""),packageG:res.packageG?String(res.packageG):f.packageG}));// Check for duplicate immediately so user sees it before filling the form
       const dupIdx=products.findIndex(x=>x.name.trim().toLowerCase()===name.trim().toLowerCase());
-      if(dupIdx>=0){const np={name:name.trim(),kcal:Math.round(res.kcal)||0,p:res.p||0,c:res.c||0,f:res.f||0,packageG:res.packageG||null,wholeOnly:false};setSaveToast({type:"duplicate",name:name,dupIdx,np});}
+      if(dupIdx>=0){const np={name:name.trim(),kcal:Math.round(res.kcal)||0,p:res.p||0,c:res.c||0,f:res.f||0,servingG:res.packageG||null,packageG:res.packageG||null};setSaveToast({type:"duplicate",name:name,dupIdx,np});}
     }}catch(e){setScanErr(String(e.message||e));}setScanning(false);};
   const filtered=products.filter(p=>{
     if(search&&!p.name.toLowerCase().includes(search.toLowerCase()))return false;
-    if(catFilter&&!(p.categories||[]).includes(catFilter))return false;
+    if(catFilter==="uncategorized"&&(p.categories||[]).length>0)return false;
+    if(catFilter&&catFilter!=="uncategorized"&&!(p.categories||[]).includes(catFilter))return false;
     if(martFilter&&(p.supermarket||"")!==martFilter)return false;
     return true;
   });
-  // Distinct supermarkets present in the product list, for the filter dropdown
   const supermarkets=[...new Set(products.map(p=>p.supermarket).filter(Boolean))].sort();
+  const uncategorizedCount=products.filter(p=>!(p.categories||[]).length).length;
   const PrepCard=({prep})=>{
     const totalG = prep.totalWeightG || 0;
     const remG = Math.round(prep.remainingWeightG ?? totalG);
@@ -2355,16 +2365,24 @@ function FoodTab({mealPreps,setMealPreps,products,setProducts,profile}){
       <div style={{padding:"18px 0 14px"}}><div style={{fontSize:26,fontWeight:800,color:C.text,letterSpacing:"-0.03em"}}>Food</div><div style={{fontSize:12,color:C.muted}}>{active.length} active prep{active.length!==1?"s":""} · {products.length} products</div></div>
       <div style={{marginBottom:16}}><div style={{fontSize:11,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Meal Preps</div>{mealPreps.length===0&&<div style={{textAlign:"center",padding:"16px 0",color:C.muted,fontSize:13}}>No meal preps yet. Tap + to create.</div>}{active.length>0&&<div style={{marginBottom:8}}><div style={{display:"flex",flexDirection:"column",gap:8}}>{active.map(p=><PrepCard key={p.id} prep={p}/>)}</div></div>}{done.length>0&&<div><button onClick={()=>setShowDone(p=>!p)} style={{width:"100%",padding:"8px 12px",borderRadius:10,background:C.card,border:`1px solid ${showDone?C.border:C.dim}`,color:C.muted,fontWeight:600,cursor:"pointer",fontSize:11,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:showDone?8:0,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}><span>Finished ({done.length})</span><span>{showDone?"▲":"▼"}</span></button>{showDone&&<div style={{display:"flex",flexDirection:"column",gap:8}}>{done.map(p=><PrepCard key={p.id} prep={p}/>)}</div>}</div>}</div>
       <button onClick={()=>setShowProd(p=>!p)} style={{width:"100%",padding:"12px 16px",borderRadius:12,background:C.card,border:`1px solid ${showProd?C.lime:C.border}`,color:showProd?C.lime:C.text,fontWeight:600,cursor:"pointer",fontSize:13,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:showProd?10:0}}><span>Product Labels ({products.length})</span><span style={{fontSize:11}}>{showProd?"▲":"▼"}</span></button>
-      {showProd&&<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><span style={{fontSize:11,color:C.muted}}>per 100g</span><button onClick={()=>{setShowAdd(p=>!p);setEditPIdx(null);setPForm({name:"",kcal:"",p:"",c:"",f:"",packageG:"",wholeOnly:false,categories:[],supermarket:""});setScanImgs([]);}} style={{padding:"7px 14px",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Add</button></div><input placeholder="Search products…" value={search} onChange={e=>setSearch(e.target.value)} style={{width:"100%",boxSizing:"border-box",background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"9px 14px",color:C.text,fontSize:13,outline:"none",marginBottom:8}}/>
+      {showProd&&<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><span style={{fontSize:11,color:C.muted}}>per 100g</span><button onClick={()=>{setShowAdd(p=>!p);setEditPIdx(null);setPForm({name:"",kcal:"",p:"",c:"",f:"",servingG:"",categories:[],supermarket:""});setScanImgs([]);}} style={{padding:"7px 14px",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Add</button></div><input placeholder="Search products…" value={search} onChange={e=>setSearch(e.target.value)} style={{width:"100%",boxSizing:"border-box",background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"9px 14px",color:C.text,fontSize:13,outline:"none",marginBottom:8}}/>
       {saveToast&&(saveToast.type==="added"||saveToast.type==="updated")&&<div style={{background:`${C.lime}15`,border:`1px solid ${C.lime}66`,borderRadius:10,padding:"9px 13px",marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}><div style={{fontSize:12,color:C.lime,fontWeight:600}}>✓ {saveToast.type==="added"?"Added":"Updated"}: <span style={{fontFamily:"monospace"}}>{saveToast.name}</span></div><button onClick={()=>setSaveToast(null)} style={{background:"none",border:"none",color:C.lime,fontSize:16,cursor:"pointer",padding:"0 4px",lineHeight:1}}>×</button></div>}
       {saveToast&&saveToast.type==="duplicate"&&<div style={{background:`${C.yellow}12`,border:`1px solid ${C.yellow}66`,borderRadius:10,padding:"10px 13px",marginBottom:10}}><div style={{fontSize:12,color:C.yellow,fontWeight:600,marginBottom:7,lineHeight:1.4}}>⚠ A product named <span style={{fontFamily:"monospace"}}>"{saveToast.name}"</span> already exists.</div><div style={{display:"flex",gap:6}}><button onClick={()=>resolveDup("update")} style={{flex:1,padding:"7px 0",borderRadius:7,background:C.yellow,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:11}}>Update existing</button><button onClick={()=>resolveDup("new")} style={{flex:1,padding:"7px 0",borderRadius:7,background:C.bg,border:`1px solid ${C.yellow}66`,color:C.yellow,fontWeight:600,cursor:"pointer",fontSize:11}}>Save as new (2)</button><button onClick={()=>setSaveToast(null)} style={{padding:"7px 10px",borderRadius:7,background:"none",border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:11}}>Cancel</button></div></div>}
-      {(showAdd||editPIdx!==null)&&<div ref={formRef} style={{background:C.card,border:`1px solid ${editPIdx!==null?C.lime:C.border}`,borderRadius:12,padding:"14px 16px",marginBottom:10}}><div style={{fontSize:11,color:editPIdx!==null?C.lime:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>{editPIdx!==null?"Editing product":"New product"}</div>{showAdd&&editPIdx===null&&<div style={{marginBottom:10}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Scan Nutrition Label</div><ImgZone imgs={scanImgs} setImgs={setScanImgs} compact/>{scanImgs.length>0&&<button onClick={scanLabelFn} disabled={scanning} style={{width:"100%",padding:"9px 0",borderRadius:8,background:scanning?C.faint:C.blue,color:"#000",fontWeight:700,border:"none",cursor:scanning?"default":"pointer",fontSize:13,marginTop:8}}>{scanning?"Reading label…":"Read Label"}</button>}{scanErr&&<div style={{fontSize:11,color:"#ff8080",marginTop:6,wordBreak:"break-word"}}>{scanErr.includes("unreadable")?"Label unreadable — please enter values manually below":scanErr}</div>}</div>}<div style={{display:"flex",flexDirection:"column",gap:8}}><Field label="Product name" value={pForm.name} onChange={pff("name")} placeholder="e.g. Lidl Greek Yogurt"/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><Field label="Kcal/100g" value={pForm.kcal} onChange={pff("kcal")} type="number" placeholder="0"/><Field label="Protein g" value={pForm.p} onChange={pff("p")} type="number" placeholder="0"/><Field label="Carbs g" value={pForm.c} onChange={pff("c")} type="number" placeholder="0"/><Field label="Fat g" value={pForm.f} onChange={pff("f")} type="number" placeholder="0"/></div><div style={{display:"flex",gap:8,alignItems:"flex-end",marginTop:4}}><div style={{flex:1}}><Field label="Package size g (optional)" value={pForm.packageG} onChange={pff("packageG")} type="number" placeholder="e.g. 50 for a bar"/></div><label style={{display:"flex",alignItems:"center",gap:6,padding:"8px 11px",background:pForm.wholeOnly?C.lime+"15":C.bg,border:`1px solid ${pForm.wholeOnly?C.lime:C.border}`,borderRadius:8,cursor:"pointer",userSelect:"none",height:"fit-content",marginBottom:1}}><input type="checkbox" checked={!!pForm.wholeOnly} onChange={e=>pff("wholeOnly")(e.target.checked)} style={{accentColor:C.lime,cursor:"pointer"}}/><span style={{fontSize:11,color:pForm.wholeOnly?C.lime:C.muted,fontWeight:pForm.wholeOnly?600:400}}>Always eaten whole</span></label></div>{pForm.wholeOnly&&pForm.packageG&&<div style={{fontSize:10,color:C.muted,fontStyle:"italic"}}>💡 When you log this, the weight will default to {pForm.packageG}g — useful for protein bars, single-serve drinks, tortillas, etc.</div>}<div style={{marginTop:4}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Categories (tap to toggle)</div><div style={{display:"flex",flexWrap:"wrap",gap:5}}>{PRODUCT_CATEGORIES.map(cat=>{const on=(pForm.categories||[]).includes(cat.id);return(<button key={cat.id} type="button" onClick={()=>toggleCat(cat.id)} style={{padding:"5px 9px",borderRadius:16,border:`1px solid ${on?C.lime:C.border}`,background:on?`${C.lime}18`:C.bg,color:on?C.lime:C.muted,cursor:"pointer",fontSize:10.5,fontWeight:on?600:400}}>{cat.emoji} {cat.label}</button>);})}</div></div><Field label="Supermarket (optional)" value={pForm.supermarket} onChange={pff("supermarket")} placeholder="e.g. Lidl, Rimi, Maxima"/>{(()=>{const k=parseFloat(pForm.kcal)||0,p=parseFloat(pForm.p)||0,c=parseFloat(pForm.c)||0,fv=parseFloat(pForm.f)||0;if(k<10)return null;const calc=Math.round(p*4+c*4+fv*9);const diff=Math.abs(k-calc);const pct=k>0?diff/k:0;if(pct<=0.25)return null;return(<div style={{background:"#1a1400",border:`1px solid ${C.yellow}40`,borderRadius:8,padding:"7px 11px",fontSize:11,color:C.yellow,lineHeight:1.4}}>⚠ Numbers don't add up: macros suggest <span style={{fontFamily:"monospace",fontWeight:700}}>~{calc} kcal</span> but you entered <span style={{fontFamily:"monospace",fontWeight:700}}>{k}</span> ({Math.round(pct*100)}% off). Double-check the label — likely one row was misread.</div>);})()}<div style={{display:"flex",gap:8}}><button onClick={()=>{setShowAdd(false);setEditPIdx(null);setPForm({name:"",kcal:"",p:"",c:"",f:"",packageG:"",wholeOnly:false,categories:[],supermarket:""});setScanImgs([]);setTimeout(()=>window.scrollTo({top:savedScrollRef.current,behavior:"smooth"}),60);}} style={{flex:1,padding:"9px 0",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:13}}>Cancel</button><button onClick={editPIdx!==null?saveEditP:addProduct} style={{flex:2,padding:"9px 0",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:13}}>{editPIdx!==null?"Save":"Save Product"}</button></div></div></div>}
+      {(showAdd||editPIdx!==null)&&<div ref={formRef} style={{background:C.card,border:`1px solid ${editPIdx!==null?C.lime:C.border}`,borderRadius:12,padding:"14px 16px",marginBottom:10}}><div style={{fontSize:11,color:editPIdx!==null?C.lime:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>{editPIdx!==null?"Editing product":"New product"}</div>{showAdd&&editPIdx===null&&<div style={{marginBottom:10}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Scan Nutrition Label</div><ImgZone imgs={scanImgs} setImgs={setScanImgs} compact/>{scanImgs.length>0&&<button onClick={scanLabelFn} disabled={scanning} style={{width:"100%",padding:"9px 0",borderRadius:8,background:scanning?C.faint:C.blue,color:"#000",fontWeight:700,border:"none",cursor:scanning?"default":"pointer",fontSize:13,marginTop:8}}>{scanning?"Reading label…":"Read Label"}</button>}{scanErr&&<div style={{fontSize:11,color:"#ff8080",marginTop:6,wordBreak:"break-word"}}>{scanErr.includes("unreadable")?"Label unreadable — please enter values manually below":scanErr}</div>}</div>}<div style={{display:"flex",flexDirection:"column",gap:8}}><Field label="Product name" value={pForm.name} onChange={pff("name")} placeholder="e.g. Lidl Greek Yogurt"/><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><Field label="Kcal/100g" value={pForm.kcal} onChange={pff("kcal")} type="number" placeholder="0"/><Field label="Protein g" value={pForm.p} onChange={pff("p")} type="number" placeholder="0"/><Field label="Carbs g" value={pForm.c} onChange={pff("c")} type="number" placeholder="0"/><Field label="Fat g" value={pForm.f} onChange={pff("f")} type="number" placeholder="0"/></div><div style={{marginTop:4}}><Field label="Usual serving size g (optional — pre-fills when logging)" value={pForm.servingG} onChange={pff("servingG")} type="number" placeholder="e.g. 55 for a protein bar"/>{pForm.servingG&&<div style={{fontSize:10,color:C.lime,marginTop:4,fontStyle:"italic"}}>🍽 Will default to {pForm.servingG}g when you log this item.</div>}</div><div style={{marginTop:4}}><div style={{fontSize:10,color:C.muted,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Categories (tap to toggle)</div><div style={{display:"flex",flexWrap:"wrap",gap:5}}>{PRODUCT_CATEGORIES.map(cat=>{const on=(pForm.categories||[]).includes(cat.id);return(<button key={cat.id} type="button" onClick={()=>toggleCat(cat.id)} style={{padding:"5px 9px",borderRadius:16,border:`1px solid ${on?C.lime:C.border}`,background:on?`${C.lime}18`:C.bg,color:on?C.lime:C.muted,cursor:"pointer",fontSize:10.5,fontWeight:on?600:400}}>{cat.emoji} {cat.label}</button>);})}</div></div><Field label="Supermarket (optional)" value={pForm.supermarket} onChange={pff("supermarket")} placeholder="e.g. Lidl, Rimi, Maxima"/>{supermarkets.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:5,marginTop:5}}>{supermarkets.map(m=>(<button key={m} type="button" onClick={()=>setPForm(p=>({...p,supermarket:p.supermarket===m?"":m}))} style={{padding:"3px 9px",borderRadius:12,border:`1px solid ${pForm.supermarket===m?C.blue:C.border}`,background:pForm.supermarket===m?`${C.blue}18`:C.bg,color:pForm.supermarket===m?C.blue:C.muted,cursor:"pointer",fontSize:10}}>{m}</button>))}</div>}{(()=>{const k=parseFloat(pForm.kcal)||0,p=parseFloat(pForm.p)||0,c=parseFloat(pForm.c)||0,fv=parseFloat(pForm.f)||0;if(k<10)return null;const calc=Math.round(p*4+c*4+fv*9);const diff=Math.abs(k-calc);const pct=k>0?diff/k:0;if(pct<=0.25)return null;return(<div style={{background:"#1a1400",border:`1px solid ${C.yellow}40`,borderRadius:8,padding:"7px 11px",fontSize:11,color:C.yellow,lineHeight:1.4}}>⚠ Numbers don't add up: macros suggest <span style={{fontFamily:"monospace",fontWeight:700}}>~{calc} kcal</span> but you entered <span style={{fontFamily:"monospace",fontWeight:700}}>{k}</span> ({Math.round(pct*100)}% off). Double-check the label — likely one row was misread.</div>);})()}<div style={{display:"flex",gap:8}}><button onClick={()=>{setShowAdd(false);setEditPIdx(null);setPForm({name:"",kcal:"",p:"",c:"",f:"",servingG:"",categories:[],supermarket:""});setScanImgs([]);setTimeout(()=>window.scrollTo({top:savedScrollRef.current,behavior:"smooth"}),60);}} style={{flex:1,padding:"9px 0",borderRadius:8,background:C.bg,border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:13}}>Cancel</button><button onClick={editPIdx!==null?saveEditP:addProduct} style={{flex:2,padding:"9px 0",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:13}}>{editPIdx!==null?"Save":"Save Product"}</button></div></div></div>}
       <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:8}}>
         <button onClick={()=>setCatFilter(null)} style={{padding:"4px 9px",borderRadius:14,border:`1px solid ${!catFilter?C.lime:C.border}`,background:!catFilter?`${C.lime}18`:C.bg,color:!catFilter?C.lime:C.muted,cursor:"pointer",fontSize:10,fontWeight:!catFilter?600:400}}>All</button>
         {PRODUCT_CATEGORIES.filter(cat=>products.some(p=>(p.categories||[]).includes(cat.id))).map(cat=>{const on=catFilter===cat.id;return(<button key={cat.id} onClick={()=>setCatFilter(on?null:cat.id)} style={{padding:"4px 9px",borderRadius:14,border:`1px solid ${on?C.lime:C.border}`,background:on?`${C.lime}18`:C.bg,color:on?C.lime:C.muted,cursor:"pointer",fontSize:10,fontWeight:on?600:400}}>{cat.emoji} {cat.label}</button>);})}
+        {uncategorizedCount>0&&<button onClick={()=>setCatFilter(catFilter==="uncategorized"?null:"uncategorized")} style={{padding:"4px 9px",borderRadius:14,border:`1px solid ${catFilter==="uncategorized"?C.yellow:C.border}`,background:catFilter==="uncategorized"?`${C.yellow}18`:C.bg,color:catFilter==="uncategorized"?C.yellow:C.muted,cursor:"pointer",fontSize:10,fontWeight:catFilter==="uncategorized"?600:400}}>⚠ No category ({uncategorizedCount})</button>}
       </div>
       {supermarkets.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:8,alignItems:"center"}}><span style={{fontSize:9,color:C.muted,fontFamily:"monospace",textTransform:"uppercase"}}>🏪</span>{supermarkets.map(m=>{const on=martFilter===m;return(<button key={m} onClick={()=>setMartFilter(on?null:m)} style={{padding:"4px 9px",borderRadius:14,border:`1px solid ${on?C.blue:C.border}`,background:on?`${C.blue}18`:C.bg,color:on?C.blue:C.muted,cursor:"pointer",fontSize:10,fontWeight:on?600:400}}>{m}</button>);})}</div>}
-      <div style={{display:"flex",flexDirection:"column",gap:5}}>{filtered.map((p,i)=>{const ri=products.indexOf(p);return(<div key={i} style={{background:C.card,border:`1px solid ${editPIdx===ri?C.lime:C.border}`,borderRadius:10,padding:"9px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div style={{flex:1,marginRight:8,minWidth:0}}><span style={{fontSize:12,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",display:"block"}}>{p.name}</span><div style={{display:"flex",gap:5,alignItems:"center",marginTop:2,flexWrap:"wrap"}}>{p.packageG&&<span style={{fontSize:9,color:p.wholeOnly?C.lime:C.muted,fontFamily:"monospace"}}>{p.wholeOnly?"🔒 ":""}{p.packageG}g/pack</span>}{(p.categories||[]).map(cid=>{const cat=catById(cid);return cat?<span key={cid} style={{fontSize:9}} title={cat.label}>{cat.emoji}</span>:null;})}{p.supermarket&&<span style={{fontSize:8.5,color:C.blue,fontFamily:"monospace"}}>🏪{p.supermarket}</span>}</div></div><div style={{display:"flex",gap:5,alignItems:"center",flexShrink:0}}><div style={{display:"flex",gap:6}}><Chip val={p.kcal} label="k" color={C.lime}/><Chip val={p.p} label="P" color={C.blue}/><Chip val={p.c} label="C" color={C.orange}/><Chip val={p.f} label="F" color={C.purple}/></div><button onClick={()=>startEditP(ri)} style={{background:"none",border:`1px solid ${C.border}`,color:C.muted,fontSize:11,cursor:"pointer",padding:"3px 6px",borderRadius:5,marginLeft:3}}>✎</button><button onClick={()=>setProducts(prev=>prev.filter((_,j)=>j!==ri))} style={{background:"none",border:"none",color:C.faint,fontSize:14,cursor:"pointer",padding:"0 2px",lineHeight:1}}>×</button></div></div>);})}</div></div>}
+      {confirmDelete!==null&&<div style={{background:"#1e0a0a",border:"1px solid #5a1a1a",borderRadius:10,padding:"10px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+        <span style={{fontSize:12,color:"#ff8080",flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>Delete <b>{products[confirmDelete]?.name}</b>?</span>
+        <div style={{display:"flex",gap:7,flexShrink:0}}>
+          <button onClick={()=>setConfirmDelete(null)} style={{padding:"5px 11px",borderRadius:6,background:C.card,border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:12}}>Cancel</button>
+          <button onClick={()=>{setProducts(prev=>prev.filter((_,j)=>j!==confirmDelete));if(editPIdx===confirmDelete){clearForm();setEditPIdx(null);}setConfirmDelete(null);}} style={{padding:"5px 11px",borderRadius:6,background:"#3a0a0a",border:"1px solid #ff4040",color:"#ff6060",fontWeight:700,cursor:"pointer",fontSize:12}}>Delete</button>
+        </div>
+      </div>}
+      <div style={{display:"flex",flexDirection:"column",gap:5}}>{filtered.map((p,i)=>{const ri=products.indexOf(p);return(<div key={i} style={{background:C.card,border:`1px solid ${editPIdx===ri?C.lime:confirmDelete===ri?"#5a1a1a":C.border}`,borderRadius:10,padding:"9px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div style={{flex:1,marginRight:8,minWidth:0}}><span style={{fontSize:12,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",display:"block"}}>{p.name}</span><div style={{display:"flex",gap:5,alignItems:"center",marginTop:2,flexWrap:"wrap"}}>{(p.servingG||p.packageG)&&<span style={{fontSize:9,color:C.lime,fontFamily:"monospace"}}>🍽{p.servingG||p.packageG}g</span>}{(p.categories||[]).map(cid=>{const cat=catById(cid);return cat?<span key={cid} style={{fontSize:9}} title={cat.label}>{cat.emoji}</span>:null;})}{p.supermarket&&<span style={{fontSize:8.5,color:C.blue,fontFamily:"monospace"}}>🏪{p.supermarket}</span>}</div></div><div style={{display:"flex",gap:5,alignItems:"center",flexShrink:0}}><div style={{display:"flex",gap:6}}><Chip val={p.kcal} label="k" color={C.lime}/><Chip val={p.p} label="P" color={C.blue}/><Chip val={p.c} label="C" color={C.orange}/><Chip val={p.f} label="F" color={C.purple}/></div><button onClick={()=>startEditP(ri)} style={{background:"none",border:`1px solid ${C.border}`,color:C.muted,fontSize:11,cursor:"pointer",padding:"3px 6px",borderRadius:5,marginLeft:3}}>✎</button><button onClick={()=>setConfirmDelete(confirmDelete===ri?null:ri)} style={{background:"none",border:"none",color:confirmDelete===ri?"#ff4040":C.faint,fontSize:14,cursor:"pointer",padding:"0 2px",lineHeight:1}}>×</button></div></div>);})}</div></div>}
     </div>
     <button onClick={()=>setModal(true)} style={{position:"absolute",bottom:16,right:16,width:54,height:54,borderRadius:"50%",background:C.lime,border:"none",cursor:"pointer",fontSize:28,color:"#000",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 0 20px ${C.lime}55`,zIndex:10}}>+</button>
     {modal&&<CreatePrepSheet products={products} onSave={prep=>{setMealPreps(p=>[prep,...p]);setModal(false);}} onClose={()=>setModal(false)} apiKey={profile.apiKey}/>}
@@ -2633,7 +2651,7 @@ function HistoryTab({weights,products,profile}){
   const [visibleCount,setVisibleCount]=useState(60);
   // Build weight lookup by date
   const weightByDate=Object.fromEntries(weights.map(w=>[w.date,w.weight]));
-  useEffect(()=>{store.get("fit_dates",[]).then(async ds=>{setDates(ds);const e={};for(const d of ds.slice(0,60)){e[d]=await store.get(`fit_day_${d}`,null);}setLogs(e);setLoading(false);});},[]);
+  useEffect(()=>{store.get("fit_dates",[]).then(async ds=>{setDates(ds);const e={};for(const d of ds.slice(0,90)){e[d]=await store.get(`fit_day_${d}`,null);}setLogs(e);setLoading(false);});},[]);
   // Lazy-load older days when visibleCount grows
   const loadMore = async () => {
     const next = visibleCount + 60;
@@ -2795,7 +2813,7 @@ function TestAPIButton({apiKey}) {
 
 function SettingsTab({profile,setProfile,weights,setWeights}){
   const [editProf,setEditProf]=useState(false);const [pf,setPf]=useState({...profile});
-  const [exportMsg,setExportMsg]=useState("");const [editWIdx,setEditWIdx]=useState(null);const [editWVal,setEditWVal]=useState("");
+  const [exportMsg,setExportMsg]=useState("");const [editWIdx,setEditWIdx]=useState(null);const [editWVal,setEditWVal]=useState("");const [showAllW,setShowAllW]=useState(false);
   const AGE=calcAge(profile.birthday);
   const saveProfile=()=>{setProfile({...pf,heightCm:parseFloat(pf.heightCm)||null,apiKey:pf.apiKey||""});setEditProf(false);};
   const exportData=async()=>{
@@ -2841,7 +2859,7 @@ function SettingsTab({profile,setProfile,weights,setWeights}){
       <div style={{fontSize:13,fontWeight:600,color:C.text,marginBottom:10}}>Weight Log</div>
       {latest&&<div style={{marginBottom:10}}><div style={{display:"flex",alignItems:"baseline",gap:6}}><span style={{fontFamily:"monospace",fontSize:28,fontWeight:800,color:C.lime,lineHeight:1}}>{latest.weight.toFixed(2)}</span><span style={{fontSize:13,color:C.muted}}>kg</span>{trend!==null&&<span style={{fontFamily:"monospace",fontSize:12,color:trend<0?C.lime:C.red,marginLeft:4}}>{trend<0?"↓":"↑"}{Math.abs(trend).toFixed(2)}/wk</span>}</div>{spark.length>=3&&<svg width={W} height={H} style={{marginTop:8,display:"block",overflow:"visible"}}><polyline points={spark.map((d,i)=>px(i)+","+py(d.weight)).join(" ")} fill="none" stroke={C.lime+"55"} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"/><polyline points={spark.map((d,i)=>px(i)+","+py(d.weight)).join(" ")} fill="none" stroke={C.lime} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/><circle cx={px(spark.length-1)} cy={py(spark[spark.length-1].weight)} r={4} fill={C.lime}/></svg>}</div>}
       <div style={{display:"flex",gap:8,marginBottom:10}}><input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" step="0.05" placeholder="Log weight (kg)" value={wInput} onChange={e=>setWInput(e.target.value.replace(",","."))} onKeyDown={e=>e.key==="Enter"&&logWeight()} style={{flex:1,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",color:C.text,fontSize:14,fontFamily:"monospace",outline:"none"}}/><button onClick={logWeight} style={{padding:"8px 16px",borderRadius:8,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:13}}>Save</button></div>
-      <div style={{display:"flex",flexDirection:"column",gap:5}}>{weights.slice(0,10).map((e,i)=>(<div key={e.date}>{editWIdx===i?<div style={{background:C.bg,border:`1px solid ${C.lime}`,borderRadius:8,padding:"7px 10px",display:"flex",gap:8,alignItems:"center"}}><span style={{fontSize:11,color:C.muted,flexShrink:0}}>{new Date(e.date+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}</span><input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" step="0.05" value={editWVal} onChange={ev=>setEditWVal(ev.target.value.replace(",","."))} autoFocus style={{flex:1,background:C.card,border:`1px solid ${C.border}`,borderRadius:6,padding:"5px 8px",color:C.text,fontSize:14,fontFamily:"monospace",outline:"none"}}/><button onClick={()=>saveEditW(i)} style={{padding:"5px 10px",borderRadius:6,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>✓</button><button onClick={()=>setEditWIdx(null)} style={{padding:"5px 8px",borderRadius:6,background:C.card,border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:12}}>✕</button></div>:<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.bg,borderRadius:8,padding:"7px 10px"}}><span style={{fontSize:11,color:C.muted}}>{new Date(e.date+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}</span><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontFamily:"monospace",fontSize:13,fontWeight:700,color:i===0?C.lime:C.text}}>{e.weight.toFixed(2)} kg</span><button onClick={()=>{setEditWIdx(i);setEditWVal(String(e.weight));}} style={{background:"none",border:`1px solid ${C.border}`,color:C.muted,fontSize:10,cursor:"pointer",padding:"2px 6px",borderRadius:4}}>✎</button><button onClick={()=>setWeights(p=>p.filter((_,j)=>j!==i))} style={{background:"none",border:"none",color:C.faint,fontSize:14,cursor:"pointer",padding:"0 2px",lineHeight:1}}>×</button></div></div>}</div>))}</div>
+      <div style={{display:"flex",flexDirection:"column",gap:5}}>{weights.slice(0,showAllW?weights.length:10).map((e,i)=>(<div key={e.date}>{editWIdx===i?<div style={{background:C.bg,border:`1px solid ${C.lime}`,borderRadius:8,padding:"7px 10px",display:"flex",gap:8,alignItems:"center"}}><span style={{fontSize:11,color:C.muted,flexShrink:0}}>{new Date(e.date+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}</span><input type="text" inputMode="decimal" pattern="[0-9]*[.]?[0-9]*" step="0.05" value={editWVal} onChange={ev=>setEditWVal(ev.target.value.replace(",","."))} autoFocus style={{flex:1,background:C.card,border:`1px solid ${C.border}`,borderRadius:6,padding:"5px 8px",color:C.text,fontSize:14,fontFamily:"monospace",outline:"none"}}/><button onClick={()=>saveEditW(i)} style={{padding:"5px 10px",borderRadius:6,background:C.lime,border:"none",color:"#000",fontWeight:700,cursor:"pointer",fontSize:12}}>✓</button><button onClick={()=>setEditWIdx(null)} style={{padding:"5px 8px",borderRadius:6,background:C.card,border:`1px solid ${C.border}`,color:C.muted,cursor:"pointer",fontSize:12}}>✕</button></div>:<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.bg,borderRadius:8,padding:"7px 10px"}}><span style={{fontSize:11,color:C.muted}}>{new Date(e.date+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}</span><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontFamily:"monospace",fontSize:13,fontWeight:700,color:i===0?C.lime:C.text}}>{e.weight.toFixed(2)} kg</span><button onClick={()=>{setEditWIdx(i);setEditWVal(String(e.weight));}} style={{background:"none",border:`1px solid ${C.border}`,color:C.muted,fontSize:10,cursor:"pointer",padding:"2px 6px",borderRadius:4}}>✎</button><button onClick={()=>setWeights(p=>p.filter((_,j)=>j!==i))} style={{background:"none",border:"none",color:C.faint,fontSize:14,cursor:"pointer",padding:"0 2px",lineHeight:1}}>×</button></div></div>}</div>))}{weights.length>10&&<button onClick={()=>setShowAllW(p=>!p)} style={{fontSize:11,color:C.muted,background:"none",border:`1px dashed ${C.border}`,borderRadius:6,padding:"5px 0",cursor:"pointer",marginTop:2}}>{showAllW?`▲ Show less`:`▾ Show all ${weights.length} entries`}</button>}</div>
     </div>
 
     {/* Profile */}
@@ -2980,6 +2998,24 @@ function Nav({tab,setTab}){
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
+function ImportScreen({onImport,onSkip}){
+  const [err,setErr]=useState(null);const [dragging,setDragging]=useState(false);
+  const load=file=>{if(!file)return;const r=new FileReader();r.onload=async e=>{try{const d=JSON.parse(e.target.result);const keys=Object.keys(d);if(!keys.some(k=>k.startsWith("fit_"))){setErr("Not a valid backup file — no fit_ keys found.");return;}let n=0;for(const[k,v]of Object.entries(d)){if(k.startsWith("fit_")){await store.set(k,v);n++;}}onImport(n);}catch(ex){setErr("Could not read file: "+String(ex.message||ex));}};r.readAsText(file);};
+  return(<div style={{background:C.bg,height:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"32px 24px",fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"}}>
+    <div style={{fontSize:40,marginBottom:12}}>📲</div>
+    <div style={{fontSize:22,fontWeight:800,color:C.text,marginBottom:6}}>Welcome back</div>
+    <div style={{fontSize:14,color:C.muted,marginBottom:28,textAlign:"center",lineHeight:1.6}}>It looks like this is a fresh install. If you have a backup from a previous device, import it now to restore all your data — meals, weights, labels, everything.</div>
+    <label onDragOver={e=>{e.preventDefault();setDragging(true);}} onDragLeave={()=>setDragging(false)} onDrop={e=>{e.preventDefault();setDragging(false);load(e.dataTransfer.files[0]);}} style={{display:"block",width:"100%",maxWidth:360,padding:"24px 16px",borderRadius:14,border:`2px dashed ${dragging?C.lime:C.border}`,background:dragging?`${C.lime}10`:C.card,cursor:"pointer",textAlign:"center",marginBottom:12}}>
+      <input type="file" accept=".json" onChange={e=>load(e.target.files[0])} style={{display:"none"}}/>
+      <div style={{fontSize:28,marginBottom:6}}>📁</div>
+      <div style={{fontSize:13,color:C.lime,fontWeight:600}}>Tap to select backup file</div>
+      <div style={{fontSize:11,color:C.muted,marginTop:4}}>Select the .json file exported from Settings</div>
+    </label>
+    {err&&<div style={{background:"#1e0a0a",border:"1px solid #5a1a1a",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#ff8080",marginBottom:12,width:"100%",maxWidth:360,textAlign:"center"}}>{err}</div>}
+    <button onClick={onSkip} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:13,padding:"8px 0"}}>This is a new account — continue setup →</button>
+  </div>);
+}
+
 function App(){
   const [tab,setTab]=useState("today");const [dayData,setDayData_]=useState(null);const [weights,setWeights_]=useState([]);const [products,setProducts_]=useState([]);const [mealPreps,setMealPreps_]=useState([]);const [profile,setProfile_]=useState(null);const [progressPhotos,setProgressPhotos_]=useState([]);const [weightPhases,setWeightPhases_]=useState([]);const [ready,setReady]=useState(false);
   // `today` is reactive state, not a const. If we use a const, leaving the app open across
@@ -2987,19 +3023,23 @@ function App(){
   // meals — and the setDayData closure writes that stale payload to today's storage key,
   // duplicating activities/meals across days.
   const [today, setToday] = useState(TODAY());
+  // The date we last loaded dayData for. Used to avoid double-loading after bootstrap.
   const lastLoadedDate = useRef(null);
-  const [rolloverBanner, setRolloverBanner] = useState(null);
+  // Track whether a date-rollover banner should appear (user's old dayData was kept open).
+  const [rolloverBanner, setRolloverBanner] = useState(null); // null | {fromDate, toDate}
 
+  // Detect midnight rollover via interval + visibility/focus listeners.
   useEffect(() => {
     const check = () => {
       const t = TODAY();
       setToday(prev => {
         if (prev === t) return prev;
+        // Date changed while app was open. Surface a banner so user knows.
         setRolloverBanner({fromDate: prev, toDate: t});
         return t;
       });
     };
-    const id = setInterval(check, 30000);
+    const id = setInterval(check, 30000); // every 30s
     const onVis = () => { if (document.visibilityState === 'visible') check(); };
     document.addEventListener('visibilitychange', onVis);
     window.addEventListener('focus', check);
@@ -3013,14 +3053,21 @@ function App(){
   useEffect(()=>{(async()=>{
     const norm = s => (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim();
     let prods=await store.get("fit_products",null);
+    // Track which preset names have ever been seeded so deletions stick.
     let seeded = await store.get("fit_seeded_presets", null);
     if(!prods){
+      // First launch — seed with full preset list, record all names as seeded
       prods = [...PRESETS];
       await store.set("fit_products", prods);
       seeded = PRESETS.map(p => norm(p.name));
       await store.set("fit_seeded_presets", seeded);
     } else {
+      // App update — only add presets that have NEVER been seeded.
+      // If the user previously deleted a seeded preset, it won't come back.
       if (!Array.isArray(seeded)) {
+        // Migration for users on old versions: assume all currently-present preset names are
+        // already "seeded" (so we don't re-add them), but anything new in PRESETS not currently
+        // present is still genuinely new and should be added.
         const existingNames = new Set(prods.map(p=>norm(p.name)));
         seeded = PRESETS.filter(p => existingNames.has(norm(p.name))).map(p => norm(p.name));
         await store.set("fit_seeded_presets", seeded);
@@ -3035,6 +3082,7 @@ function App(){
         console.log("[update] Added " + trulyNew.length + " never-seeded preset products");
       }
     }
+    // Use the date at the moment of bootstrap (in case midnight already passed during load).
     const bootDate = TODAY();
     const day=await store.get(`fit_day_${bootDate}`,{date:bootDate,dayType:"rest",meals:[],activities:[],burnedExtra:0,tags:[],goalMode:null});
     if(!day.activities)day.activities=[];if(!day.tags)day.tags=[];
@@ -3042,11 +3090,14 @@ function App(){
     const prof=await store.get("fit_profile",null)||DEFAULT_PROFILE;const photos=await store.get("fit_photos",[]);
     const phases=await store.get("fit_weight_phases",[]);
     setProducts_(prods);setDayData_(day);setWeights_(wts);setMealPreps_(preps);setProfile_(prof);setProgressPhotos_(photos);setWeightPhases_(phases);
-    setToday(bootDate);
+    setToday(bootDate); // Make sure state matches what we just loaded
     lastLoadedDate.current = bootDate;
     setReady(true);
   })();},[]);
 
+  // When the date rolls over after bootstrap, reload dayData for the new date.
+  // Without this, dayData would still hold yesterday's meals and the setDayData callback
+  // (which writes to `fit_day_${today}`) would overwrite today's data with yesterday's.
   useEffect(() => {
     if (!ready) return;
     if (lastLoadedDate.current === today) return;
@@ -3068,7 +3119,12 @@ function App(){
   const setWeightPhases=useCallback(upd=>{setWeightPhases_(p=>{const n=typeof upd==="function"?upd(p):upd;store.set("fit_weight_phases",n);return n;});},[]);
   const latestWeight=weights[0]?.weight;
   const needsOnboarding=!profile?.birthday||!profile?.heightCm;
-  if(!ready||!profile)return(<div style={{background:C.bg,height:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:C.muted,fontFamily:"monospace",fontSize:13}}>Loading…</div></div>);
+  const [showImport,setShowImport]=useState(null); // null=loading, true=show, false=skip
+  // On first mount: if no profile exists at all, offer import before onboarding
+  useEffect(()=>{if(ready){setShowImport(prev=>prev===null?(!profile?.birthday):prev);}}, [ready]);
+  const handleImportDone=async(n)=>{setShowImport(false);window.location.reload();};
+  if(!ready||!profile||showImport===null)return(<div style={{background:C.bg,height:"100vh",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:C.muted,fontFamily:"monospace",fontSize:13}}>Loading…</div></div>);
+  if(showImport===true)return(<ImportScreen onImport={handleImportDone} onSkip={()=>setShowImport(false)}/>);
   if(needsOnboarding)return(<OnboardingScreen onDone={p=>{setProfile(p);setTab("today");}}/>);
   return(<div style={{background:C.bg,height:"100vh",display:"flex",flexDirection:"column",fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",maxWidth:520,margin:"0 auto"}}>
     <style>{`*{-webkit-tap-highlight-color:transparent;box-sizing:border-box}input,textarea{color-scheme:dark}::-webkit-scrollbar{display:none}button:active{opacity:0.82}`}</style>
@@ -3089,17 +3145,9 @@ function App(){
   </div>);
 }
 
-
-        ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-  </script>
-  <script>
-    if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
-        navigator.serviceWorker.register("sw.js")
-          .then(r => console.log("SW registered"))
-          .catch(e => console.log("SW failed:", e));
-      });
-    }
-  </script>
+const { createElement: ce } = React;
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(ce(App));
+</script>
 </body>
 </html>
