@@ -2100,8 +2100,9 @@ function ActivityTab({dayData,setDayData,profile,weights,setWeights,weightPhases
   const [newPhaseOpen,setNewPhaseOpen]=useState(false);
   const [newPhaseLabel,setNewPhaseLabel]=useState("");
   const [newPhaseGoal,setNewPhaseGoal]=useState(profile?.goal||"cut");
-  const activePhase=weightPhases.find(p=>!p.endDate)||null;
-  const closedPhases=weightPhases.filter(p=>!!p.endDate).sort((a,b)=>b.startDate.localeCompare(a.startDate));
+  const wp=weightPhases||[];
+  const activePhase=wp.find(p=>!p.endDate)||null;
+  const closedPhases=wp.filter(p=>!!p.endDate).sort((a,b)=>b.startDate.localeCompare(a.startDate));
 
   const phaseDuration=(startDate,endDate)=>{
     const days=Math.round((new Date((endDate||TODAY())+"T12:00:00")-new Date(startDate+"T12:00:00"))/(86400000));
@@ -2196,7 +2197,7 @@ function ActivityTab({dayData,setDayData,profile,weights,setWeights,weightPhases
             <span style={{fontSize:11,color:C.blue,fontFamily:"monospace",textTransform:"uppercase",letterSpacing:"0.08em"}}>Weight Phases</span>
             {activePhase&&<span style={{fontSize:10,color:C.lime,marginLeft:8}}>● {activePhase.label} active</span>}
           </div>
-          <span style={{fontSize:11,color:C.muted}}>{showPhases?"▲":"▼"} {weightPhases.length} phase{weightPhases.length!==1?"s":""}</span>
+          <span style={{fontSize:11,color:C.muted}}>{showPhases?"▲":"▼"} {wp.length} phase{wp.length!==1?"s":""}</span>
         </button>
         {showPhases&&<div style={{marginTop:12}}>
           {/* Active phase */}
@@ -3089,7 +3090,7 @@ function App(){
     const wts=await store.get("fit_weights",[]);const preps=await store.get("fit_mealpreps",[]);
     const prof=await store.get("fit_profile",null)||DEFAULT_PROFILE;const photos=await store.get("fit_photos",[]);
     const phases=await store.get("fit_weight_phases",[]);
-    setProducts_(prods);setDayData_(day);setWeights_(wts);setMealPreps_(preps);setProfile_(prof);setProgressPhotos_(photos);setWeightPhases_(phases);
+    setProducts_(prods);setDayData_(day);setWeights_(wts);setMealPreps_(preps);setProfile_(prof);setProgressPhotos_(photos);setWeightPhases_(Array.isArray(phases)?phases:[]);
     setToday(bootDate); // Make sure state matches what we just loaded
     lastLoadedDate.current = bootDate;
     setReady(true);
@@ -3135,7 +3136,7 @@ function App(){
     </div>}
     <div style={{flex:1,overflow:"hidden"}}>
       {tab==="today"&&<TodayTab dayData={dayData} setDayData={setDayData} mealPreps={mealPreps} setMealPreps={setMealPreps} products={products} setProducts={setProducts} profile={profile} latestWeight={latestWeight} weights={weights} setWeights={setWeights} onGoToSettings={()=>setTab("settings")}/>}
-      {tab==="activity"&&<ActivityTab dayData={dayData} setDayData={setDayData} profile={profile} weights={weights} setWeights={setWeights} weightPhases={weightPhases} setWeightPhases={setWeightPhases}/>}
+      {tab==="activity"&&<ActivityTab dayData={dayData} setDayData={setDayData} profile={profile} weights={weights} setWeights={setWeights} weightPhases={weightPhases||[]} setWeightPhases={setWeightPhases}/>}
       {tab==="food"&&<FoodTab mealPreps={mealPreps} setMealPreps={setMealPreps} products={products} setProducts={setProducts} profile={profile}/>}
       {tab==="analysis"&&<AnalysisTab weights={weights} profile={profile} setProfile={setProfile} progressPhotos={progressPhotos} setProgressPhotos={setProgressPhotos} products={products} mealPreps={mealPreps} weightPhases={weightPhases}/>}
       {tab==="history"&&<HistoryTab weights={weights} products={products} profile={profile}/>}
